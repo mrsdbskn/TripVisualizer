@@ -1,13 +1,54 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useTimelineStore } from '../../stores/timelineStore'
-import { Calendar, Compass, X, Check, Globe } from 'lucide-vue-next'
+import { Calendar, Compass, X, Check, Clock, Filter } from 'lucide-vue-next'
 
 const timelineStore = useTimelineStore()
 
+const inputStartDate = ref(timelineStore.startDate || '')
+const inputEndDate = ref(timelineStore.endDate || '')
+
+// Keep inputs in sync if store changes
+watch(
+  () => [timelineStore.startDate, timelineStore.endDate],
+  ([start, end]) => {
+    inputStartDate.value = start || ''
+    inputEndDate.value = end || ''
+  }
+)
+
+const applyCustomDates = () => {
+  if (inputStartDate.value || inputEndDate.value) {
+    timelineStore.setDateRange(
+      inputStartDate.value || null,
+      inputEndDate.value || null
+    )
+  }
+}
+
+const applyPreset = (preset: 'last7' | 'last30' | 'thisYear' | 'all') => {
+  const now = new Date()
+  if (preset === 'all') {
+    timelineStore.setDateRange(null, null)
+    timelineStore.setFilterYear(null)
+    timelineStore.setFilterCluster(null)
+    inputStartDate.value = ''
+    inputEndDate.value = ''
+  } else if (preset === 'last7') {
+    const start = new Date(now.getTime() - 7 * 24 * 3600 * 1000)
+    timelineStore.setDateRange(start.toISOString().split('T')[0], now.toISOString().split('T')[0])
+  } else if (preset === 'last30') {
+    const start = new Date(now.getTime() - 30 * 24 * 3600 * 1000)
+    timelineStore.setDateRange(start.toISOString().split('T')[0], now.toISOString().split('T')[0])
+  } else if (preset === 'thisYear') {
+    const start = `${now.getFullYear()}-01-01`
+    const end = `${now.getFullYear()}-12-31`
+    timelineStore.setDateRange(start, end)
+  }
+}
+
 const availableYears = computed(() => {
   if (timelineStore.years.length > 0) return timelineStore.years
-  // Default range 2014 to 2026 if empty
   const list = []
   for (let y = 2026; y >= 2014; y--) {
     list.push({ year: y, totalDistanceKm: 0, segmentCount: 0, flightCount: 0, countriesCount: 0 })
@@ -24,9 +65,11 @@ const selectCluster = (clusterId: string) => {
 }
 
 const clearFilter = () => {
+  timelineStore.setDateRange(null, null)
   timelineStore.setFilterYear(null)
   timelineStore.setFilterCluster(null)
-  timelineStore.setCustomTimeRange(null)
+  inputStartDate.value = ''
+  inputEndDate.value = ''
 }
 </script>
 
@@ -35,7 +78,7 @@ const clearFilter = () => {
     <div class="filter-header">
       <div class="header-title">
         <Calendar :size="18" class="text-cyan" />
-        <h3>Date & Trip Filter</h3>
+        <h3>Date & Frame Range Setter</h3>
       </div>
       <button class="close-btn" @click="timelineStore.isFilterOpen = false">
         <X :size="18" />
@@ -43,26 +86,63 @@ const clearFilter = () => {
     </div>
 
     <div class="filter-body">
-      <!-- Year Selection Section -->
+      <!-- 1. Exact Date Range Frame Picker -->
+      <div class="filter-section">
+        <div class="section-title">
+          <Clock :size="13" />
+          <span>Exact Date Window</span>
+        </div>
+
+        <div class="date-picker-row">
+          <div class="date-input-group">
+            <label class="input-sublabel">From</label>
+            <input
+              type="date"
+              v-model="inputStartDate"
+              class="glass-date-input"
+              @change="applyCustomDates"
+            />
+          </div>
+          <div class="date-input-group">
+            <label class="input-sublabel">To</label>
+            <input
+              type="date"
+              v-model="inputEndDate"
+              class="glass-date-input"
+              @change="applyCustomDates"
+            />
+          </div>
+        </div>
+
+        <!-- Quick Presets -->
+        <div class="preset-chips">
+          <button class="preset-btn" @click="applyPreset('last7')">Last 7 Days</button>
+          <button class="preset-btn" @click="applyPreset('last30')">Last 30 Days</button>
+          <button class="preset-btn" @click="applyPreset('thisYear')">This Year</button>
+          <button class="preset-btn all" @click="applyPreset('all')">All Time</button>
+        </div>
+      </div>
+
+      <!-- 2. Year Selection Grid -->
       <div class="filter-section">
         <div class="section-title">
           <span>Filter by Year</span>
           <button
             class="clear-link"
-            v-if="timelineStore.selectedYear || timelineStore.selectedClusterId"
+            v-if="timelineStore.selectedYear || timelineStore.startDate || timelineStore.selectedClusterId"
             @click="clearFilter"
           >
-            Show All Time
+            Clear All
           </button>
         </div>
 
         <div class="year-grid">
           <button
             class="year-chip"
-            :class="{ active: timelineStore.selectedYear === null && timelineStore.selectedClusterId === null }"
+            :class="{ active: timelineStore.selectedYear === null && !timelineStore.startDate && !timelineStore.selectedClusterId }"
             @click="selectYear(null)"
           >
-            All Time
+            All Years
           </button>
           <button
             v-for="y in availableYears"
@@ -79,7 +159,7 @@ const clearFilter = () => {
         </div>
       </div>
 
-      <!-- Trip Clusters / Vacations Section -->
+      <!-- 3. Trip Clusters Section -->
       <div class="filter-section" v-if="timelineStore.clusters.length > 0">
         <div class="section-title">
           <span>Detected Trip Journeys</span>
@@ -88,7 +168,7 @@ const clearFilter = () => {
 
         <div class="cluster-list">
           <div
-            v-for="cluster in timelineStore.clusters.slice(0, 12)"
+            v-for="cluster in timelineStore.clusters.slice(0, 15)"
             :key="cluster.id"
             class="cluster-card"
             :class="{ active: timelineStore.selectedClusterId === cluster.id }"
@@ -116,8 +196,8 @@ const clearFilter = () => {
   position: absolute;
   top: 86px;
   left: 20px;
-  width: 380px;
-  max-height: calc(100vh - 200px);
+  width: 400px;
+  max-height: calc(100vh - 160px);
   display: flex;
   flex-direction: column;
   z-index: 25;
@@ -189,12 +269,13 @@ const clearFilter = () => {
 .section-title {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-  font-weight: 600;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-muted);
+  justify-content: space-between;
 }
 
 .clear-link {
@@ -207,6 +288,71 @@ const clearFilter = () => {
 
 .clear-link:hover {
   text-decoration: underline;
+}
+
+.date-picker-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.date-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.input-sublabel {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.glass-date-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: #ffffff;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  outline: none;
+  transition: var(--transition-smooth);
+}
+
+.glass-date-input:focus {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 10px var(--accent-cyan-glow);
+}
+
+.preset-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.preset-btn {
+  padding: 5px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.preset-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.preset-btn.all {
+  background: rgba(0, 240, 255, 0.15);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
 }
 
 .badge {
@@ -264,7 +410,7 @@ const clearFilter = () => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 240px;
+  max-height: 220px;
   overflow-y: auto;
 }
 

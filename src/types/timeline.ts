@@ -71,6 +71,27 @@ export interface YearSummary {
   countriesCount: number
 }
 
+export interface ActionFilters {
+  showFlights: boolean
+  showDrives: boolean
+  showTrains: boolean
+  showWalks: boolean
+  showVisits: boolean
+  onlyVisitedCities: boolean
+}
+
+export interface CityDetail {
+  name: string
+  country: string
+  coordinates: GeoPoint
+  visitCount: number
+  totalStayHours: number
+  firstVisitDate: number
+  lastVisitDate: number
+  segments: TimelineSegment[]
+  topPlaces: { name: string; count: number }[]
+}
+
 export interface TravelStats {
   totalDistanceKm: number
   totalTravelTimeHours: number

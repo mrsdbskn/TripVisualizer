@@ -11,7 +11,8 @@ import {
   Share2,
   Globe,
   Video,
-  Layers
+  Building2,
+  MapPin
 } from 'lucide-vue-next'
 
 const timelineStore = useTimelineStore()
@@ -26,12 +27,13 @@ const themes: { id: GlobeTheme; label: string; icon: string }[] = [
 const cameraModes: { id: CameraMode; label: string; icon: string }[] = [
   { id: 'follow', label: 'Follow Cam', icon: '🎥' },
   { id: 'bird', label: "Bird's Eye", icon: '🦅' },
-  { id: 'orbit', label: 'Cinematic Orbit', icon: '🔄' },
+  { id: 'orbit', label: 'Space Orbit', icon: '🔄' },
   { id: 'free', label: 'Free Orbit', icon: '🌐' }
 ]
 
 const isThemeMenuOpen = ref(false)
 const isCameraMenuOpen = ref(false)
+const isCityMenuOpen = ref(false)
 
 const selectTheme = (theme: GlobeTheme) => {
   timelineStore.setTheme(theme)
@@ -41,6 +43,11 @@ const selectTheme = (theme: GlobeTheme) => {
 const selectCamera = (mode: CameraMode) => {
   timelineStore.setCameraMode(mode)
   isCameraMenuOpen.value = false
+}
+
+const selectCity = (cityName: string | null) => {
+  timelineStore.selectCity(cityName)
+  isCityMenuOpen.value = false
 }
 </script>
 
@@ -79,11 +86,48 @@ const selectCamera = (mode: CameraMode) => {
     </div>
 
     <div class="header-right">
+      <!-- City Drilldown Dropdown Selector -->
+      <div class="dropdown-wrapper" v-if="timelineStore.availableCities.length > 0">
+        <button
+          class="glass-btn"
+          :class="{ active: timelineStore.selectedCity !== null }"
+          @click="isCityMenuOpen = !isCityMenuOpen; isThemeMenuOpen = false; isCameraMenuOpen = false"
+        >
+          <Building2 :size="16" />
+          <span>{{ timelineStore.selectedCity || 'Explore City' }}</span>
+        </button>
+
+        <div class="dropdown-menu glass-panel-elevated city-dropdown-scroll" v-if="isCityMenuOpen">
+          <div
+            class="dropdown-item"
+            :class="{ active: timelineStore.selectedCity === null }"
+            @click="selectCity(null)"
+          >
+            <Globe :size="14" />
+            <span>All World / Whole Globe</span>
+          </div>
+
+          <div
+            v-for="c in timelineStore.availableCities.slice(0, 20)"
+            :key="c.name"
+            class="dropdown-item"
+            :class="{ active: timelineStore.selectedCity === c.name }"
+            @click="selectCity(c.name)"
+          >
+            <MapPin :size="14" class="text-rose" />
+            <div class="city-opt">
+              <span class="city-opt-name">{{ c.name }}</span>
+              <span class="city-opt-country">{{ c.country }} ({{ c.visitCount }}x)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Theme Switcher Dropdown -->
       <div class="dropdown-wrapper">
         <button
           class="glass-btn"
-          @click="isThemeMenuOpen = !isThemeMenuOpen; isCameraMenuOpen = false"
+          @click="isThemeMenuOpen = !isThemeMenuOpen; isCameraMenuOpen = false; isCityMenuOpen = false"
         >
           <Globe :size="16" />
           <span>{{ themes.find(t => t.id === timelineStore.globeTheme)?.label }}</span>
@@ -107,7 +151,7 @@ const selectCamera = (mode: CameraMode) => {
       <div class="dropdown-wrapper">
         <button
           class="glass-btn"
-          @click="isCameraMenuOpen = !isCameraMenuOpen; isThemeMenuOpen = false"
+          @click="isCameraMenuOpen = !isCameraMenuOpen; isThemeMenuOpen = false; isCityMenuOpen = false"
         >
           <Video :size="16" />
           <span>{{ cameraModes.find(c => c.id === timelineStore.cameraMode)?.label }}</span>
@@ -127,12 +171,12 @@ const selectCamera = (mode: CameraMode) => {
         </div>
       </div>
 
-      <!-- Filter Toggle -->
+      <!-- Date Frame Setter Toggle -->
       <button
         class="glass-btn"
         :class="{ active: timelineStore.isFilterOpen }"
         @click="timelineStore.isFilterOpen = !timelineStore.isFilterOpen"
-        title="Filter by Year or Trip Cluster"
+        title="Set Exact Date Ranges & Timeline Window"
       >
         <Calendar :size="16" />
         <span>Dates</span>
@@ -180,7 +224,7 @@ const selectCamera = (mode: CameraMode) => {
 .header-left, .header-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .brand {
@@ -246,12 +290,18 @@ const selectCamera = (mode: CameraMode) => {
   position: absolute;
   top: calc(100% + 8px);
   left: 0;
-  min-width: 190px;
+  min-width: 200px;
   padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 4px;
   z-index: 50;
+}
+
+.city-dropdown-scroll {
+  max-height: 280px;
+  overflow-y: auto;
+  min-width: 240px;
 }
 
 .dropdown-item {
@@ -277,6 +327,20 @@ const selectCamera = (mode: CameraMode) => {
   color: var(--accent-cyan);
 }
 
+.city-opt {
+  display: flex;
+  flex-direction: column;
+}
+
+.city-opt-name {
+  font-weight: 600;
+}
+
+.city-opt-country {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
 .story-export-btn {
   background: linear-gradient(135deg, rgba(255, 42, 109, 0.25) 0%, rgba(255, 107, 53, 0.25) 100%);
   border-color: rgba(255, 42, 109, 0.4);
@@ -289,11 +353,10 @@ const selectCamera = (mode: CameraMode) => {
   box-shadow: 0 0 16px rgba(255, 42, 109, 0.4);
 }
 
-.text-amber {
-  color: var(--accent-amber);
-}
+.text-amber { color: var(--accent-amber); }
+.text-rose { color: var(--accent-rose); }
 
-@media (max-width: 900px) {
+@media (max-width: 1000px) {
   .app-header {
     height: auto;
     padding: 12px;

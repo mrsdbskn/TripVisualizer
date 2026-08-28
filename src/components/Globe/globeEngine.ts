@@ -32,6 +32,14 @@ export class GlobeEngine {
   private markersGroup: THREE.Group
   private vehicleRenderer: VehicleRenderer
 
+  // High-Res Satellite Texture references
+  private textureLoader = new THREE.TextureLoader()
+  private satelliteDayMap: THREE.Texture | null = null
+  private nightLightsMap: THREE.Texture | null = null
+  private specularMap: THREE.Texture | null = null
+  private bumpMap: THREE.Texture | null = null
+  private cloudsMap: THREE.Texture | null = null
+
   // Interaction & Camera
   private cameraMode: CameraMode = 'follow'
   private currentTheme: GlobeTheme = 'satellite'
@@ -41,7 +49,7 @@ export class GlobeEngine {
   private isUserInteracting = false
   private pointerPrev = { x: 0, y: 0 }
   private spherical = { radius: 260, phi: Math.PI / 2.5, theta: 0 }
-  private orbitSpeed = 0.0008
+  private isFocusing = false
 
   // Route animation states
   private flightDashOffset = 0
@@ -58,9 +66,9 @@ export class GlobeEngine {
 
     // 1. Scene & Camera
     this.scene = new THREE.Scene()
-    this.scene.background = new THREE.Color(0x060810)
+    this.scene.background = new THREE.Color(0x04060c)
 
-    this.camera = new THREE.PerspectiveCamera(45, this.width / this.height, 1, 3000)
+    this.camera = new THREE.PerspectiveCamera(45, this.width / this.height, 1, 4000)
     this.camera.position.set(0, 50, 260)
 
     // 2. Renderer
@@ -68,12 +76,12 @@ export class GlobeEngine {
       antialias: true,
       alpha: true,
       powerPreference: 'high-performance',
-      preserveDrawingBuffer: true // Required for Instagram Story snapshot & recording!
+      preserveDrawingBuffer: true
     })
     this.renderer.setSize(this.width, this.height)
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.15
+    this.renderer.toneMappingExposure = 1.25
     this.container.appendChild(this.renderer.domElement)
 
     // 3. Groups
@@ -87,7 +95,7 @@ export class GlobeEngine {
     this.earthGroup.add(this.vehicleRenderer.getObject())
     this.scene.add(this.earthGroup)
 
-    // 4. Build Components
+    // 4. Setup Lighting, Starfield, Atmospheric Glow & Globe
     this.setupLighting()
     this.buildStarfield()
     this.buildEarthSphere()
@@ -95,33 +103,37 @@ export class GlobeEngine {
     this.buildClouds()
     this.setupEventListeners()
 
-    // 5. Start Render Loop
+    // 5. Load High-Definition Satellite Textures Asynchronously
+    this.loadHighResSatelliteTextures()
+
+    // 6. Start Render Loop
     this.startLoop()
   }
 
   private setupLighting() {
-    const ambient = new THREE.AmbientLight(0xffffff, 0.45)
+    // Ambient light simulating cosmic background glow
+    const ambient = new THREE.AmbientLight(0xddeeff, 0.45)
     this.scene.add(ambient)
 
-    // Sun directional light
-    const sunLight = new THREE.DirectionalLight(0xfff5e6, 1.8)
-    sunLight.position.set(400, 200, 300)
+    // Sun directional light (illuminates Day Hemisphere with specular glint on oceans)
+    const sunLight = new THREE.DirectionalLight(0xfff8ee, 2.2)
+    sunLight.position.set(500, 250, 350)
     this.scene.add(sunLight)
 
-    // Subtle blue rim light from opposite side
-    const rimLight = new THREE.DirectionalLight(0x00f0ff, 0.6)
-    rimLight.position.set(-300, -100, -200)
-    this.scene.add(rimLight)
+    // Atmospheric rim light from deep space
+    const spaceRimLight = new THREE.DirectionalLight(0x00d4ff, 0.7)
+    spaceRimLight.position.set(-400, -150, -300)
+    this.scene.add(spaceRimLight)
   }
 
   private buildStarfield() {
-    const starCount = 1800
+    const starCount = 2200
     const starGeo = new THREE.BufferGeometry()
     const positions = new Float32Array(starCount * 3)
     const colors = new Float32Array(starCount * 3)
 
     for (let i = 0; i < starCount; i++) {
-      const radius = 1000 + Math.random() * 800
+      const radius = 1200 + Math.random() * 1000
       const theta = Math.random() * Math.PI * 2
       const phi = Math.acos(Math.random() * 2 - 1)
 
@@ -129,14 +141,13 @@ export class GlobeEngine {
       positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta)
       positions[i * 3 + 2] = radius * Math.cos(phi)
 
-      // Varied star tints (white, cyan, gold)
       const tint = Math.random()
-      if (tint > 0.8) {
-        colors[i * 3] = 0.4; colors[i * 3 + 1] = 0.8; colors[i * 3 + 2] = 1.0 // cyan
-      } else if (tint > 0.6) {
-        colors[i * 3] = 1.0; colors[i * 3 + 1] = 0.85; colors[i * 3 + 2] = 0.5 // warm gold
+      if (tint > 0.85) {
+        colors[i * 3] = 0.4; colors[i * 3 + 1] = 0.85; colors[i * 3 + 2] = 1.0 // cyan
+      } else if (tint > 0.7) {
+        colors[i * 3] = 1.0; colors[i * 3 + 1] = 0.88; colors[i * 3 + 2] = 0.55 // warm gold
       } else {
-        colors[i * 3] = 0.9; colors[i * 3 + 1] = 0.95; colors[i * 3 + 2] = 1.0 // diamond white
+        colors[i * 3] = 0.95; colors[i * 3 + 1] = 0.98; colors[i * 3 + 2] = 1.0 // diamond white
       }
     }
 
@@ -144,10 +155,10 @@ export class GlobeEngine {
     starGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
 
     const starMat = new THREE.PointsMaterial({
-      size: 2.2,
+      size: 2.4,
       vertexColors: true,
       transparent: true,
-      opacity: 0.85
+      opacity: 0.9
     })
 
     this.starsParticles = new THREE.Points(starGeo, starMat)
@@ -155,117 +166,165 @@ export class GlobeEngine {
   }
 
   /**
-   * Generates procedural photoreal Earth texture map with continents, oceans, and night lights
+   * High-resolution fallback vector map of continents, oceans, and night lights
    */
-  private generateEarthTexture(isNight: boolean = false): THREE.CanvasTexture {
+  private generateHighDetailEarthTexture(isNight: boolean = false): THREE.CanvasTexture {
     const canvas = document.createElement('canvas')
     canvas.width = 2048
     canvas.height = 1024
     const ctx = canvas.getContext('2d')!
 
     if (isNight) {
-      // Dark space background with glowing city lights
-      ctx.fillStyle = '#05070e'
+      ctx.fillStyle = '#03050b'
       ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-      // Draw glowing continent city clusters
+      // Glowing urban centers
       ctx.fillStyle = '#ffaa33'
       ctx.shadowColor = '#00f0ff'
-      ctx.shadowBlur = 4
-      for (let i = 0; i < 600; i++) {
+      ctx.shadowBlur = 5
+      for (let i = 0; i < 900; i++) {
         const x = Math.random() * canvas.width
-        const y = 200 + Math.random() * (canvas.height - 400)
-        const size = Math.random() * 2.5
+        const y = 180 + Math.random() * (canvas.height - 360)
+        const size = 0.5 + Math.random() * 2.2
         ctx.beginPath()
         ctx.arc(x, y, size, 0, Math.PI * 2)
         ctx.fill()
       }
     } else {
-      // Realistic Ocean Gradient
-      const oceanGrad = ctx.createLinearGradient(0, 0, 0, canvas.height)
-      oceanGrad.addColorStop(0, '#0a2342')
-      oceanGrad.addColorStop(0.5, '#001a33')
-      oceanGrad.addColorStop(1, '#05192d')
-      ctx.fillStyle = oceanGrad
+      // Bathymetric Ocean Depth Gradient
+      const ocean = ctx.createLinearGradient(0, 0, 0, canvas.height)
+      ocean.addColorStop(0, '#0c274c')
+      ocean.addColorStop(0.5, '#051b38')
+      ocean.addColorStop(1, '#082244')
+      ctx.fillStyle = ocean
       ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-      // Continents procedural landmasses
-      ctx.fillStyle = '#1e3f20'
-      ctx.strokeStyle = '#2d5a30'
-      ctx.lineWidth = 2
+      // Continents with topographical color layers (Eurasia, Americas, Africa, Australia)
+      ctx.fillStyle = '#264a28' // Vegetated land
+      ctx.strokeStyle = '#38693b'
+      ctx.lineWidth = 3
 
-      // Europe & Asia land block
+      // Europe & Asia
       ctx.beginPath()
-      ctx.ellipse(canvas.width * 0.65, canvas.height * 0.35, 340, 180, 0, 0, Math.PI * 2)
+      ctx.ellipse(canvas.width * 0.64, canvas.height * 0.34, 380, 190, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.stroke()
+
+      // Sahara / Desert Topography
+      ctx.fillStyle = '#8c764b'
+      ctx.beginPath()
+      ctx.ellipse(canvas.width * 0.52, canvas.height * 0.44, 160, 80, 0, 0, Math.PI * 2)
       ctx.fill()
 
-      // Africa
+      // Central/South Africa
+      ctx.fillStyle = '#224624'
       ctx.beginPath()
-      ctx.ellipse(canvas.width * 0.52, canvas.height * 0.58, 140, 200, 0.2, 0, Math.PI * 2)
+      ctx.ellipse(canvas.width * 0.53, canvas.height * 0.62, 130, 150, 0.1, 0, Math.PI * 2)
       ctx.fill()
 
-      // Americas
+      // North America
       ctx.beginPath()
-      ctx.ellipse(canvas.width * 0.25, canvas.height * 0.38, 160, 160, -0.2, 0, Math.PI * 2)
-      ctx.ellipse(canvas.width * 0.32, canvas.height * 0.68, 110, 180, 0.3, 0, Math.PI * 2)
+      ctx.ellipse(canvas.width * 0.25, canvas.height * 0.36, 190, 160, -0.15, 0, Math.PI * 2)
+      ctx.fill()
+
+      // South America
+      ctx.beginPath()
+      ctx.ellipse(canvas.width * 0.32, canvas.height * 0.68, 120, 190, 0.25, 0, Math.PI * 2)
       ctx.fill()
 
       // Australia
+      ctx.fillStyle = '#7a5a3a'
       ctx.beginPath()
-      ctx.ellipse(canvas.width * 0.82, canvas.height * 0.72, 80, 60, 0, 0, Math.PI * 2)
+      ctx.ellipse(canvas.width * 0.82, canvas.height * 0.72, 90, 70, 0, 0, Math.PI * 2)
       ctx.fill()
 
-      // Polar ice caps
-      ctx.fillStyle = 'rgba(230, 245, 255, 0.85)'
-      ctx.fillRect(0, 0, canvas.width, 45)
-      ctx.fillRect(0, canvas.height - 45, canvas.width, 45)
+      // Polar Ice Caps
+      ctx.fillStyle = '#eaf5ff'
+      ctx.fillRect(0, 0, canvas.width, 50)
+      ctx.fillRect(0, canvas.height - 50, canvas.width, 50)
     }
 
-    const texture = new THREE.CanvasTexture(canvas)
-    texture.wrapS = THREE.RepeatWrapping
-    texture.wrapT = THREE.ClampToEdgeWrapping
-    return texture
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.wrapS = THREE.RepeatWrapping
+    tex.wrapT = THREE.ClampToEdgeWrapping
+    return tex
   }
 
   private buildEarthSphere() {
     const geo = new THREE.SphereGeometry(this.globeRadius, 64, 64)
-    const dayTexture = this.generateEarthTexture(false)
+    const initialTexture = this.generateHighDetailEarthTexture(false)
 
     this.earthMaterial = new THREE.MeshStandardMaterial({
-      map: dayTexture,
-      roughness: 0.65,
-      metalness: 0.15
+      map: initialTexture,
+      roughness: 0.55,
+      metalness: 0.25
     })
 
     this.earthMesh = new THREE.Mesh(geo, this.earthMaterial)
     this.earthGroup.add(this.earthMesh)
   }
 
+  private loadHighResSatelliteTextures() {
+    // High-resolution NASA Blue Marble Day Map & Night Lights from public CDN with robust fallbacks
+    const dayUrl = 'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg'
+    const nightUrl = 'https://unpkg.com/three-globe/example/img/earth-night.jpg'
+    const bumpUrl = 'https://unpkg.com/three-globe/example/img/earth-topology.png'
+    const cloudsUrl = 'https://unpkg.com/three-globe/example/img/earth-clouds.png'
+
+    this.textureLoader.load(
+      dayUrl,
+      (tex) => {
+        tex.wrapS = THREE.RepeatWrapping
+        this.satelliteDayMap = tex
+        if (this.currentTheme === 'satellite') {
+          this.earthMaterial.map = tex
+          this.earthMaterial.needsUpdate = true
+        }
+      },
+      undefined,
+      () => {
+        // Fallback already in place
+      }
+    )
+
+    this.textureLoader.load(
+      bumpUrl,
+      (tex) => {
+        tex.wrapS = THREE.RepeatWrapping
+        this.bumpMap = tex
+        this.earthMaterial.bumpMap = tex
+        this.earthMaterial.bumpScale = 1.2
+        this.earthMaterial.needsUpdate = true
+      }
+    )
+
+    this.textureLoader.load(
+      nightUrl,
+      (tex) => {
+        tex.wrapS = THREE.RepeatWrapping
+        this.nightLightsMap = tex
+      }
+    )
+
+    this.textureLoader.load(
+      cloudsUrl,
+      (tex) => {
+        tex.wrapS = THREE.RepeatWrapping
+        this.cloudsMap = tex
+        if (this.cloudsMesh && this.cloudsMesh.material) {
+          const mat = this.cloudsMesh.material as THREE.MeshStandardMaterial
+          mat.map = tex
+          mat.needsUpdate = true
+        }
+      }
+    )
+  }
+
   private buildClouds() {
-    const canvas = document.createElement('canvas')
-    canvas.width = 1024
-    canvas.height = 512
-    const ctx = canvas.getContext('2d')!
-    ctx.fillStyle = 'transparent'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-    // Swirly cloud puffs
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)'
-    for (let i = 0; i < 70; i++) {
-      const x = Math.random() * canvas.width
-      const y = Math.random() * canvas.height
-      const r = 25 + Math.random() * 65
-      ctx.beginPath()
-      ctx.arc(x, y, r, 0, Math.PI * 2)
-      ctx.fill()
-    }
-
-    const cloudTex = new THREE.CanvasTexture(canvas)
-    const cloudGeo = new THREE.SphereGeometry(this.globeRadius + 1.2, 48, 48)
+    const cloudGeo = new THREE.SphereGeometry(this.globeRadius + 1.4, 64, 64)
     const cloudMat = new THREE.MeshStandardMaterial({
-      map: cloudTex,
       transparent: true,
-      opacity: 0.5,
+      opacity: 0.45,
       blending: THREE.AdditiveBlending
     })
 
@@ -274,9 +333,9 @@ export class GlobeEngine {
   }
 
   private buildAtmosphere() {
-    const geo = new THREE.SphereGeometry(this.globeRadius * 1.15, 48, 48)
+    const geo = new THREE.SphereGeometry(this.globeRadius * 1.16, 64, 64)
 
-    // Custom Rayleigh Atmosphere Fresnel Glow Shader
+    // Photorealistic Rayleigh atmospheric Fresnel scattering shader
     const atmosphereShader = {
       vertexShader: `
         varying vec3 vNormal;
@@ -288,8 +347,8 @@ export class GlobeEngine {
       fragmentShader: `
         varying vec3 vNormal;
         void main() {
-          float intensity = pow(0.65 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 2.5);
-          gl_FragColor = vec4(0.0, 0.85, 1.0, 1.0) * intensity * 1.4;
+          float intensity = pow(0.68 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 2.8);
+          gl_FragColor = vec4(0.0, 0.85, 1.0, 1.0) * intensity * 1.6;
         }
       `
     }
@@ -309,37 +368,55 @@ export class GlobeEngine {
   public setTheme(theme: GlobeTheme) {
     this.currentTheme = theme
     if (theme === 'neon') {
+      this.earthMaterial.map = null
       this.earthMaterial.color.set(0x060b18)
       this.earthMaterial.roughness = 0.2
       this.earthMaterial.metalness = 0.8
-      this.scene.background = new THREE.Color(0x03040a)
+      this.earthMaterial.needsUpdate = true
+      this.scene.background = new THREE.Color(0x020308)
     } else if (theme === 'night') {
-      this.earthMaterial.map = this.generateEarthTexture(true)
-      this.earthMaterial.needsUpdate = true
+      this.earthMaterial.map = this.nightLightsMap || this.generateHighDetailEarthTexture(true)
       this.earthMaterial.color.set(0xffffff)
+      this.earthMaterial.needsUpdate = true
+      this.scene.background = new THREE.Color(0x03050c)
     } else if (theme === 'atlas') {
-      this.earthMaterial.color.set(0x1a2130)
-      this.earthMaterial.roughness = 0.9
+      this.earthMaterial.map = null
+      this.earthMaterial.color.set(0x161c28)
+      this.earthMaterial.roughness = 0.95
       this.earthMaterial.metalness = 0.0
-      this.scene.background = new THREE.Color(0x0d111a)
-    } else {
-      // Satellite photoreal
-      this.earthMaterial.map = this.generateEarthTexture(false)
       this.earthMaterial.needsUpdate = true
+      this.scene.background = new THREE.Color(0x080b12)
+    } else {
+      // Photoreal NASA Satellite
+      this.earthMaterial.map = this.satelliteDayMap || this.generateHighDetailEarthTexture(false)
       this.earthMaterial.color.set(0xffffff)
-      this.scene.background = new THREE.Color(0x060810)
+      this.earthMaterial.roughness = 0.55
+      this.earthMaterial.metalness = 0.25
+      this.earthMaterial.needsUpdate = true
+      this.scene.background = new THREE.Color(0x04060c)
     }
   }
 
   public setCameraMode(mode: CameraMode) {
     this.cameraMode = mode
+    this.isFocusing = false
+  }
+
+  /**
+   * Smoothly animates the camera to swoop down and focus on specific city coordinates
+   */
+  public focusOnCoordinates(lat: number, lng: number, distance: number = 150) {
+    const targetPos = latLngToVector3(lat, lng, this.globeRadius, 0)
+    const normal = targetPos.clone().normalize()
+    this.targetCameraPos.copy(targetPos).add(normal.clone().multiplyScalar(distance - this.globeRadius))
+    this.targetLookAt.copy(targetPos)
+    this.isFocusing = true
   }
 
   /**
    * Rebuilds routes and destination pins for active timeline segments
    */
-  public updateRoutes(segments: TimelineSegment[]) {
-    // Clear previous
+  public updateRoutes(segments: TimelineSegment[], selectedCityName: string | null = null) {
     while (this.routesGroup.children.length > 0) {
       const obj = this.routesGroup.children[0]
       this.routesGroup.remove(obj)
@@ -358,7 +435,8 @@ export class GlobeEngine {
         const key = `${seg.point.lat.toFixed(2)},${seg.point.lng.toFixed(2)}`
         if (!visitedPlacesSet.has(key)) {
           visitedPlacesSet.add(key)
-          this.createPlaceMarker(seg.point, seg.semanticType || 'VISIT')
+          const isSelected = selectedCityName ? seg.city === selectedCityName : false
+          this.createPlaceMarker(seg.point, seg.semanticType || 'VISIT', seg.city || 'City', isSelected)
         }
       }
 
@@ -384,7 +462,6 @@ export class GlobeEngine {
           )
           const geometry = new THREE.BufferGeometry().setFromPoints(points)
 
-          // Glowing Dashed Flight Material
           const mat = new THREE.LineDashedMaterial({
             color,
             linewidth: 2,
@@ -399,7 +476,7 @@ export class GlobeEngine {
           this.routesGroup.add(line)
           this.flightMaterials.push(mat)
         } else {
-          // Ground Route (curved along surface)
+          // Ground Route
           const allPoints: THREE.Vector3[] = []
           for (let i = 0; i < seg.path.length - 1; i++) {
             const pts = createArcPoints(
@@ -417,7 +494,7 @@ export class GlobeEngine {
             const mat = new THREE.LineBasicMaterial({
               color,
               transparent: true,
-              opacity: 0.75,
+              opacity: 0.8,
               linewidth: 2
             })
             const line = new THREE.Line(geometry, mat)
@@ -428,27 +505,27 @@ export class GlobeEngine {
     }
   }
 
-  private createPlaceMarker(point: GeoPoint, semanticType: string) {
+  private createPlaceMarker(point: GeoPoint, semanticType: string, cityName: string, isSelected: boolean = false) {
     const pos = latLngToVector3(point.lat, point.lng, this.globeRadius, 0.4)
     const normal = pos.clone().normalize()
 
     // 1. Pulsing base ring
-    const ringGeo = new THREE.RingGeometry(0.8, 1.3, 24)
+    const ringGeo = new THREE.RingGeometry(0.9, isSelected ? 2.4 : 1.4, 24)
     const ringMat = new THREE.MeshBasicMaterial({
-      color: 0x00f0ff,
+      color: isSelected ? 0xff2a6d : 0x00f0ff,
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.8
+      opacity: 0.85
     })
     const ring = new THREE.Mesh(ringGeo, ringMat)
     ring.position.copy(pos)
     ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
 
     // 2. Pin stem & bead
-    const pinPos = latLngToVector3(point.lat, point.lng, this.globeRadius, 2.5)
-    const beadGeo = new THREE.SphereGeometry(0.9, 12, 12)
+    const pinPos = latLngToVector3(point.lat, point.lng, this.globeRadius, isSelected ? 4.0 : 2.5)
+    const beadGeo = new THREE.SphereGeometry(isSelected ? 1.4 : 0.9, 14, 14)
     const beadMat = new THREE.MeshBasicMaterial({
-      color: semanticType === 'HOME' ? 0xff2a6d : 0xffb703
+      color: isSelected ? 0xff2a6d : (semanticType === 'HOME' ? 0xff0055 : 0xffb703)
     })
     const bead = new THREE.Mesh(beadGeo, beadMat)
     bead.position.copy(pinPos)
@@ -460,7 +537,7 @@ export class GlobeEngine {
   }
 
   /**
-   * Updates vehicle position and handles smooth cinematic camera movements
+   * Updates vehicle position and handles smooth cinematic space camera
    */
   public updateJourney(state: ActiveJourneyState) {
     if (!state.currentPosition) return
@@ -472,12 +549,10 @@ export class GlobeEngine {
       state.currentAltitude || 0.4
     )
 
-    // Calculate forward movement direction
     const forwardDeg = state.currentHeading
     const forwardRad = (forwardDeg * Math.PI) / 180
     const normal = pos3D.clone().normalize()
 
-    // Tangent direction vectors on sphere
     const northTangent = new THREE.Vector3(0, 1, 0)
       .projectOnPlane(normal)
       .normalize()
@@ -490,7 +565,6 @@ export class GlobeEngine {
       .addScaledVector(eastTangent, Math.sin(forwardRad))
       .normalize()
 
-    // Update vehicle mesh
     this.vehicleRenderer.update(
       pos3D,
       forward,
@@ -498,26 +572,23 @@ export class GlobeEngine {
       0
     )
 
-    // Camera Mode Handling
-    if (!this.isUserInteracting) {
+    if (!this.isUserInteracting && !this.isFocusing) {
       if (this.cameraMode === 'follow') {
-        // Smooth 3rd Person Follow Cam: behind and slightly above
         const camOffset = forward.clone().multiplyScalar(-24).add(normal.clone().multiplyScalar(14))
         this.targetCameraPos.copy(pos3D).add(camOffset)
         this.targetLookAt.copy(pos3D).add(forward.clone().multiplyScalar(10))
       } else if (this.cameraMode === 'bird') {
-        // High altitude Bird's eye
         this.targetCameraPos.copy(pos3D).add(normal.clone().multiplyScalar(75))
         this.targetLookAt.copy(pos3D)
       } else if (this.cameraMode === 'orbit') {
-        // Orbiting around globe with smooth altitude
-        this.spherical.theta += 0.003
+        // Space Orbit: smooth slow planetary rotation with authentic inclination
+        this.spherical.theta += 0.002
         this.targetCameraPos.setFromSphericalCoords(
-          240,
-          Math.PI / 2.8,
+          250,
+          Math.PI / 2.6,
           this.spherical.theta
         )
-        this.targetLookAt.copy(pos3D).multiplyScalar(0.4)
+        this.targetLookAt.copy(pos3D).multiplyScalar(0.3)
       }
     }
   }
@@ -527,6 +598,7 @@ export class GlobeEngine {
 
     el.addEventListener('pointerdown', (e) => {
       this.isUserInteracting = true
+      this.isFocusing = false
       this.pointerPrev.x = e.clientX
       this.pointerPrev.y = e.clientY
     })
@@ -561,7 +633,7 @@ export class GlobeEngine {
     el.addEventListener('wheel', (e) => {
       e.preventDefault()
       const zoomFactor = e.deltaY * 0.15
-      this.spherical.radius = Math.max(120, Math.min(600, this.spherical.radius + zoomFactor))
+      this.spherical.radius = Math.max(115, Math.min(650, this.spherical.radius + zoomFactor))
       if (this.cameraMode === 'free') {
         this.camera.position.setFromSphericalCoords(
           this.spherical.radius,
@@ -587,21 +659,18 @@ export class GlobeEngine {
     const render = () => {
       this.animationFrameId = requestAnimationFrame(render)
 
-      // 1. Subtle Cloud & Starfield Rotation
-      if (this.cloudsMesh) this.cloudsMesh.rotation.y += 0.0003
-      if (this.starsParticles) this.starsParticles.rotation.y += 0.00005
+      if (this.cloudsMesh) this.cloudsMesh.rotation.y += 0.00035
+      if (this.starsParticles) this.starsParticles.rotation.y += 0.00006
 
-      // 2. Animate Flight Dashes
       this.flightDashOffset -= 0.15
       for (const mat of this.flightMaterials) {
         mat.dashSize = 4
         mat.gapSize = 2
       }
 
-      // 3. Smooth Camera Interpolation (Damping)
       if (this.cameraMode !== 'free' && !this.isUserInteracting) {
-        this.camera.position.lerp(this.targetCameraPos, 0.06)
-        this.currentLookAt.lerp(this.targetLookAt, 0.08)
+        this.camera.position.lerp(this.targetCameraPos, 0.05)
+        this.currentLookAt.lerp(this.targetLookAt, 0.07)
         this.camera.lookAt(this.currentLookAt)
       }
 

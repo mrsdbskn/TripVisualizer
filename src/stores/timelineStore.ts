@@ -7,14 +7,17 @@ import type {
   GlobeTheme,
   CameraMode,
   ActiveJourneyState,
-  ActivityType
+  ActivityType,
+  ActionFilters,
+  CityDetail,
+  GeoPoint
 } from '../types/timeline'
 import { calculateBearing, haversineDistanceKm } from '../services/geodesic'
 import { generateSampleDataset } from '../services/timelineParser'
 
 export const useTimelineStore = defineStore('timeline', {
   state: () => ({
-    // Data
+    // Raw Data
     segments: [] as TimelineSegment[],
     clusters: [] as TripCluster[],
     stats: null as TravelStats | null,
@@ -32,16 +35,32 @@ export const useTimelineStore = defineStore('timeline', {
     showClouds: true,
     autoRotateGlobe: false,
 
-    // Filtering
+    // Action Filters (Hide/Show specific activities)
+    actionFilters: {
+      showFlights: true,
+      showDrives: true,
+      showTrains: true,
+      showWalks: true,
+      showVisits: true,
+      onlyVisitedCities: false
+    } as ActionFilters,
+
+    // Date Filters
     selectedYear: null as number | null,
     selectedClusterId: null as string | null,
+    startDate: null as string | null, // YYYY-MM-DD
+    endDate: null as string | null,   // YYYY-MM-DD
     customTimeRange: null as [number, number] | null,
+
+    // City Deep-Dive Drilldown
+    selectedCity: null as string | null,
+    isCityDrawerOpen: false,
 
     // Playback Engine
     isPlaying: false,
-    playbackSpeed: 10, // multiplier
-    playbackIndex: 0, // index into filtered segments
-    playbackSegmentProgress: 0, // 0..1 within current segment
+    playbackSpeed: 10,
+    playbackIndex: 0,
+    playbackSegmentProgress: 0,
     activeJourneyState: {
       currentSegment: null,
       currentPosition: null,
@@ -70,26 +89,138 @@ export const useTimelineStore = defineStore('timeline', {
       return state.segments[state.segments.length - 1].endTime
     },
 
+    minDateString(state): string {
+      if (state.segments.length === 0) return '2014-01-01'
+      return new Date(state.segments[0].startTime).toISOString().split('T')[0]
+    },
+
+    maxDateString(state): string {
+      if (state.segments.length === 0) return new Date().toISOString().split('T')[0]
+      return new Date(state.segments[state.segments.length - 1].endTime).toISOString().split('T')[0]
+    },
+
+    /**
+     * Extracts all unique cities with their coordinates and visit counts
+     */
+    availableCities(state): CityDetail[] {
+      const cityMap = new Map<string, {
+        name: string
+        country: string
+        coordinates: GeoPoint
+        visitCount: number
+        totalStayHours: number
+        firstVisitDate: number
+        lastVisitDate: number
+        segments: TimelineSegment[]
+        placeCounts: Map<string, number>
+      }>()
+
+      for (const seg of state.segments) {
+        if (!seg.city || seg.city === 'Unknown Place' || seg.city === 'Journey') continue
+
+        const key = seg.city
+        const coord = seg.point || seg.startPoint || { lat: 0, lng: 0 }
+
+        if (!cityMap.has(key)) {
+          cityMap.set(key, {
+            name: seg.city,
+            country: seg.country || 'World',
+            coordinates: coord,
+            visitCount: 0,
+            totalStayHours: 0,
+            firstVisitDate: seg.startTime,
+            lastVisitDate: seg.endTime,
+            segments: [],
+            placeCounts: new Map()
+          })
+        }
+
+        const data = cityMap.get(key)!
+        data.segments.push(seg)
+        if (seg.type === 'visit') {
+          data.visitCount++
+          data.totalStayHours += seg.durationMinutes / 60
+        }
+        if (seg.placeName) {
+          data.placeCounts.set(seg.placeName, (data.placeCounts.get(seg.placeName) || 0) + 1)
+        }
+        if (seg.startTime < data.firstVisitDate) data.firstVisitDate = seg.startTime
+        if (seg.endTime > data.lastVisitDate) data.lastVisitDate = seg.endTime
+      }
+
+      return Array.from(cityMap.values())
+        .map(c => ({
+          name: c.name,
+          country: c.country,
+          coordinates: c.coordinates,
+          visitCount: Math.max(1, c.visitCount),
+          totalStayHours: Math.round(c.totalStayHours),
+          firstVisitDate: c.firstVisitDate,
+          lastVisitDate: c.lastVisitDate,
+          segments: c.segments,
+          topPlaces: Array.from(c.placeCounts.entries())
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 10)
+        }))
+        .sort((a, b) => b.visitCount - a.visitCount)
+    },
+
+    selectedCityDetail(state): CityDetail | null {
+      if (!state.selectedCity) return null
+      return this.availableCities.find(c => c.name === state.selectedCity) || null
+    },
+
     filteredSegments(state): TimelineSegment[] {
       if (state.segments.length === 0) return []
 
-      if (state.selectedClusterId) {
-        const cluster = state.clusters.find(c => c.id === state.selectedClusterId)
-        if (cluster) return cluster.segments
+      let list = state.segments
+
+      // 1. City Filter Drilldown
+      if (state.selectedCity) {
+        list = list.filter(s => s.city === state.selectedCity || (s.placeName && s.placeName.includes(state.selectedCity!)))
       }
 
-      if (state.selectedYear) {
+      // 2. Exact Date Range Filter
+      if (state.startDate || state.endDate) {
+        const startTs = state.startDate ? new Date(state.startDate + 'T00:00:00').getTime() : 0
+        const endTs = state.endDate ? new Date(state.endDate + 'T23:59:59').getTime() : Infinity
+        list = list.filter(s => s.startTime >= startTs && s.endTime <= endTs)
+      }
+      // 3. Year Filter
+      else if (state.selectedYear) {
         const yrStart = new Date(state.selectedYear, 0, 1).getTime()
         const yrEnd = new Date(state.selectedYear, 11, 31, 23, 59, 59).getTime()
-        return state.segments.filter(s => s.startTime >= yrStart && s.endTime <= yrEnd)
+        list = list.filter(s => s.startTime >= yrStart && s.endTime <= yrEnd)
       }
-
-      if (state.customTimeRange) {
+      // 4. Trip Cluster Filter
+      else if (state.selectedClusterId) {
+        const cluster = state.clusters.find(c => c.id === state.selectedClusterId)
+        if (cluster) list = cluster.segments
+      }
+      // 5. Custom Time Range
+      else if (state.customTimeRange) {
         const [start, end] = state.customTimeRange
-        return state.segments.filter(s => s.startTime >= start && s.endTime <= end)
+        list = list.filter(s => s.startTime >= start && s.endTime <= end)
       }
 
-      return state.segments
+      // 6. Action Filters
+      const f = state.actionFilters
+      if (f.onlyVisitedCities) {
+        // Only keep visits or inter-city flights/trains
+        list = list.filter(s => s.type === 'visit' || s.activityType === 'FLYING' || (s.distanceMeters && s.distanceMeters > 30000))
+      } else {
+        list = list.filter(s => {
+          if (s.type === 'visit') return f.showVisits
+          if (s.activityType === 'FLYING') return f.showFlights
+          if (s.activityType === 'IN_PASSENGER_VEHICLE' || s.activityType === 'IN_VEHICLE' || s.activityType === 'MOTORCYCLING' || s.activityType === 'IN_TAXI') return f.showDrives
+          if (s.activityType === 'IN_TRAIN' || s.activityType === 'IN_TRAM' || s.activityType === 'IN_SUBWAY' || s.activityType === 'IN_BUS') return f.showTrains
+          if (s.activityType === 'WALKING' || s.activityType === 'RUNNING' || s.activityType === 'CYCLING' || s.activityType === 'SKIING') return f.showWalks
+          return true
+        })
+      }
+
+      return list
     },
 
     filteredStats(state): TravelStats {
@@ -117,7 +248,6 @@ export const useTimelineStore = defineStore('timeline', {
         )
       }
 
-      // Live compute for filtered subset
       let totalDist = 0
       let totalTravelH = 0
       let totalStayH = 0
@@ -205,6 +335,10 @@ export const useTimelineStore = defineStore('timeline', {
       this.playbackSegmentProgress = 0
       this.selectedYear = null
       this.selectedClusterId = null
+      this.startDate = null
+      this.endDate = null
+      this.selectedCity = null
+      this.isCityDrawerOpen = false
       this.customTimeRange = null
 
       this.updateActiveJourneyState()
@@ -227,9 +361,21 @@ export const useTimelineStore = defineStore('timeline', {
       this.playbackSpeed = speed
     },
 
+    setDateRange(start: string | null, end: string | null) {
+      this.startDate = start
+      this.endDate = end
+      this.selectedYear = null
+      this.selectedClusterId = null
+      this.playbackIndex = 0
+      this.playbackSegmentProgress = 0
+      this.updateActiveJourneyState()
+    },
+
     setFilterYear(year: number | null) {
       this.selectedYear = year
       this.selectedClusterId = null
+      this.startDate = null
+      this.endDate = null
       this.playbackIndex = 0
       this.playbackSegmentProgress = 0
       this.updateActiveJourneyState()
@@ -238,15 +384,23 @@ export const useTimelineStore = defineStore('timeline', {
     setFilterCluster(clusterId: string | null) {
       this.selectedClusterId = clusterId
       this.selectedYear = null
+      this.startDate = null
+      this.endDate = null
       this.playbackIndex = 0
       this.playbackSegmentProgress = 0
       this.updateActiveJourneyState()
     },
 
-    setCustomTimeRange(range: [number, number] | null) {
-      this.customTimeRange = range
-      this.selectedYear = null
-      this.selectedClusterId = null
+    selectCity(cityName: string | null) {
+      this.selectedCity = cityName
+      this.isCityDrawerOpen = cityName !== null
+      this.playbackIndex = 0
+      this.playbackSegmentProgress = 0
+      this.updateActiveJourneyState()
+    },
+
+    toggleActionFilter(filterKey: keyof ActionFilters) {
+      this.actionFilters[filterKey] = !this.actionFilters[filterKey]
       this.playbackIndex = 0
       this.playbackSegmentProgress = 0
       this.updateActiveJourneyState()
@@ -285,7 +439,6 @@ export const useTimelineStore = defineStore('timeline', {
         return
       }
 
-      // Base duration for a segment in animation: ~2.5s for normal activity, 4s for flight
       const baseDurationSec = seg.activityType === 'FLYING' ? 3.5 : 2.0
       const scaledSpeed = Math.max(0.5, this.playbackSpeed / 5)
       const step = (deltaSeconds / baseDurationSec) * scaledSpeed
@@ -295,7 +448,6 @@ export const useTimelineStore = defineStore('timeline', {
         this.playbackSegmentProgress = 0
         this.playbackIndex++
         if (this.playbackIndex >= segs.length) {
-          // Loop around
           this.playbackIndex = 0
         }
       }

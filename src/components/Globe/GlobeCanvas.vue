@@ -16,10 +16,9 @@ onMounted(() => {
     engine.setCameraMode(timelineStore.cameraMode)
 
     if (timelineStore.filteredSegments.length > 0) {
-      engine.updateRoutes(timelineStore.filteredSegments)
+      engine.updateRoutes(timelineStore.filteredSegments, timelineStore.selectedCity)
     }
 
-    // Playback loop
     const tick = (now: number) => {
       playbackRaf = requestAnimationFrame(tick)
       const deltaSec = (now - lastTime) / 1000
@@ -44,18 +43,32 @@ onUnmounted(() => {
   if (engine) engine.destroy()
 })
 
-// Reactivity watchers
 watch(
   () => timelineStore.filteredSegments,
   (newSegments) => {
     if (engine) {
-      engine.updateRoutes(newSegments)
+      engine.updateRoutes(newSegments, timelineStore.selectedCity)
       if (newSegments.length > 0 && timelineStore.activeJourneyState.currentPosition) {
         engine.updateJourney(timelineStore.activeJourneyState)
       }
     }
   },
   { deep: false }
+)
+
+watch(
+  () => timelineStore.selectedCity,
+  (city) => {
+    if (engine) {
+      engine.updateRoutes(timelineStore.filteredSegments, city)
+      if (city) {
+        const detail = timelineStore.selectedCityDetail
+        if (detail && detail.coordinates) {
+          engine.focusOnCoordinates(detail.coordinates.lat, detail.coordinates.lng, 145)
+        }
+      }
+    }
+  }
 )
 
 watch(
@@ -74,7 +87,10 @@ watch(
 
 defineExpose({
   captureSnapshot: () => engine?.captureSnapshot() || '',
-  getCanvas: () => engine?.getCanvas() || null
+  getCanvas: () => engine?.getCanvas() || null,
+  focusOnCoordinates: (lat: number, lng: number, distance: number = 145) => {
+    engine?.focusOnCoordinates(lat, lng, distance)
+  }
 })
 </script>
 
@@ -107,7 +123,7 @@ defineExpose({
 
 .hud-status {
   position: absolute;
-  top: 80px;
+  top: 86px;
   right: 24px;
   display: flex;
   flex-direction: column;
