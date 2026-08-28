@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useTimelineStore } from '../../stores/timelineStore'
-import type { GlobeTheme, CameraMode } from '../../types/timeline'
+import type { MapLayerType } from '../../types/timeline'
 import {
   Compass,
   UploadCloud,
@@ -10,39 +10,28 @@ import {
   Calendar,
   Share2,
   Globe,
-  Video,
   Building2,
-  MapPin
+  MapPin,
+  ListOrdered,
+  Layers,
+  Map
 } from 'lucide-vue-next'
 
 const timelineStore = useTimelineStore()
 
-const themes: { id: GlobeTheme; label: string; icon: string }[] = [
-  { id: 'satellite', label: 'Photoreal Satellite', icon: '🛰️' },
-  { id: 'neon', label: 'Cyber Neon', icon: '🌙' },
-  { id: 'atlas', label: 'Atlas Minimal', icon: '🗺️' },
-  { id: 'night', label: 'City Lights', icon: '🌆' }
+const mapLayers: { id: MapLayerType; label: string; icon: string }[] = [
+  { id: 'satellite', label: 'Satellite Map', icon: '🛰️' },
+  { id: 'dark', label: 'Dark Basemap', icon: '🌙' },
+  { id: 'light', label: 'Light Basemap', icon: '🗺️' },
+  { id: 'topo', label: 'Topographic', icon: '🏔️' }
 ]
 
-const cameraModes: { id: CameraMode; label: string; icon: string }[] = [
-  { id: 'follow', label: 'Follow Cam', icon: '🎥' },
-  { id: 'bird', label: "Bird's Eye", icon: '🦅' },
-  { id: 'orbit', label: 'Space Orbit', icon: '🔄' },
-  { id: 'free', label: 'Free Orbit', icon: '🌐' }
-]
-
-const isThemeMenuOpen = ref(false)
-const isCameraMenuOpen = ref(false)
+const isLayerMenuOpen = ref(false)
 const isCityMenuOpen = ref(false)
 
-const selectTheme = (theme: GlobeTheme) => {
-  timelineStore.setTheme(theme)
-  isThemeMenuOpen.value = false
-}
-
-const selectCamera = (mode: CameraMode) => {
-  timelineStore.setCameraMode(mode)
-  isCameraMenuOpen.value = false
+const selectLayer = (layer: MapLayerType) => {
+  timelineStore.setMapLayer(layer)
+  isLayerMenuOpen.value = false
 }
 
 const selectCity = (cityName: string | null) => {
@@ -60,7 +49,7 @@ const selectCity = (cityName: string | null) => {
         </div>
         <div class="brand-text">
           <h1 class="brand-title">Trip<span class="brand-highlight">Visualizer</span></h1>
-          <span class="brand-badge">3D GLOBE</span>
+          <span class="brand-badge">WORLD MAP</span>
         </div>
       </div>
 
@@ -86,12 +75,23 @@ const selectCity = (cityName: string | null) => {
     </div>
 
     <div class="header-right">
+      <!-- Trip Overview Itinerary Button -->
+      <button
+        class="glass-btn"
+        :class="{ active: timelineStore.isOverviewOpen }"
+        @click="timelineStore.toggleOverview()"
+        title="Open Full Trip Overview Itinerary with Edit Controls"
+      >
+        <ListOrdered :size="16" />
+        <span>Trip Overview</span>
+      </button>
+
       <!-- City Drilldown Dropdown Selector -->
       <div class="dropdown-wrapper" v-if="timelineStore.availableCities.length > 0">
         <button
           class="glass-btn"
           :class="{ active: timelineStore.selectedCity !== null }"
-          @click="isCityMenuOpen = !isCityMenuOpen; isThemeMenuOpen = false; isCameraMenuOpen = false"
+          @click="isCityMenuOpen = !isCityMenuOpen; isLayerMenuOpen = false"
         >
           <Building2 :size="16" />
           <span>{{ timelineStore.selectedCity || 'Explore City' }}</span>
@@ -104,11 +104,11 @@ const selectCity = (cityName: string | null) => {
             @click="selectCity(null)"
           >
             <Globe :size="14" />
-            <span>All World / Whole Globe</span>
+            <span>All World / Full Map</span>
           </div>
 
           <div
-            v-for="c in timelineStore.availableCities.slice(0, 20)"
+            v-for="c in timelineStore.availableCities.slice(0, 25)"
             :key="c.name"
             class="dropdown-item"
             :class="{ active: timelineStore.selectedCity === c.name }"
@@ -117,56 +117,32 @@ const selectCity = (cityName: string | null) => {
             <MapPin :size="14" class="text-rose" />
             <div class="city-opt">
               <span class="city-opt-name">{{ c.name }}</span>
-              <span class="city-opt-country">{{ c.country }} ({{ c.visitCount }}x)</span>
+              <span class="city-opt-country">{{ c.country }} ({{ c.visitCount }} visits)</span>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Theme Switcher Dropdown -->
+      <!-- Basemap / Satellite Switcher Dropdown -->
       <div class="dropdown-wrapper">
         <button
           class="glass-btn"
-          @click="isThemeMenuOpen = !isThemeMenuOpen; isCameraMenuOpen = false; isCityMenuOpen = false"
+          @click="isLayerMenuOpen = !isLayerMenuOpen; isCityMenuOpen = false"
         >
-          <Globe :size="16" />
-          <span>{{ themes.find(t => t.id === timelineStore.globeTheme)?.label }}</span>
+          <Layers :size="16" />
+          <span>{{ mapLayers.find(l => l.id === timelineStore.mapLayer)?.label }}</span>
         </button>
 
-        <div class="dropdown-menu glass-panel-elevated" v-if="isThemeMenuOpen">
+        <div class="dropdown-menu glass-panel-elevated" v-if="isLayerMenuOpen">
           <div
-            v-for="t in themes"
-            :key="t.id"
+            v-for="l in mapLayers"
+            :key="l.id"
             class="dropdown-item"
-            :class="{ active: timelineStore.globeTheme === t.id }"
-            @click="selectTheme(t.id)"
+            :class="{ active: timelineStore.mapLayer === l.id }"
+            @click="selectLayer(l.id)"
           >
-            <span>{{ t.icon }}</span>
-            <span>{{ t.label }}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Camera Mode Dropdown -->
-      <div class="dropdown-wrapper">
-        <button
-          class="glass-btn"
-          @click="isCameraMenuOpen = !isCameraMenuOpen; isThemeMenuOpen = false; isCityMenuOpen = false"
-        >
-          <Video :size="16" />
-          <span>{{ cameraModes.find(c => c.id === timelineStore.cameraMode)?.label }}</span>
-        </button>
-
-        <div class="dropdown-menu glass-panel-elevated" v-if="isCameraMenuOpen">
-          <div
-            v-for="c in cameraModes"
-            :key="c.id"
-            class="dropdown-item"
-            :class="{ active: timelineStore.cameraMode === c.id }"
-            @click="selectCamera(c.id)"
-          >
-            <span>{{ c.icon }}</span>
-            <span>{{ c.label }}</span>
+            <span>{{ l.icon }}</span>
+            <span>{{ l.label }}</span>
           </div>
         </div>
       </div>
@@ -187,7 +163,7 @@ const selectCity = (cityName: string | null) => {
         class="glass-btn"
         :class="{ active: timelineStore.isStatsOpen }"
         @click="timelineStore.isStatsOpen = !timelineStore.isStatsOpen"
-        title="View Travel Analytics & Metrics"
+        title="View Travel Analytics & City Metrics"
       >
         <BarChart3 :size="16" />
         <span>Stats</span>
@@ -217,7 +193,7 @@ const selectCity = (cityName: string | null) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  z-index: 20;
+  z-index: 1000;
   border-radius: var(--radius-lg);
 }
 
@@ -295,7 +271,7 @@ const selectCity = (cityName: string | null) => {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  z-index: 50;
+  z-index: 1050;
 }
 
 .city-dropdown-scroll {
@@ -356,7 +332,7 @@ const selectCity = (cityName: string | null) => {
 .text-amber { color: var(--accent-amber); }
 .text-rose { color: var(--accent-rose); }
 
-@media (max-width: 1000px) {
+@media (max-width: 1100px) {
   .app-header {
     height: auto;
     padding: 12px;

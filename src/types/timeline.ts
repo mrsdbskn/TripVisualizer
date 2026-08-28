@@ -86,6 +86,10 @@ export interface CityDetail {
   coordinates: GeoPoint
   visitCount: number
   totalStayHours: number
+  localDistanceKm: number
+  walkKm: number
+  driveKm: number
+  trainKm: number
   firstVisitDate: number
   lastVisitDate: number
   segments: TimelineSegment[]
@@ -111,6 +115,7 @@ export interface TravelStats {
   modeBreakdown: Partial<Record<ActivityType, { distanceKm: number; count: number; durationHours: number }>>
 }
 
+export type MapLayerType = 'satellite' | 'dark' | 'light' | 'topo'
 export type GlobeTheme = 'satellite' | 'neon' | 'atlas' | 'night'
 export type CameraMode = 'follow' | 'bird' | 'orbit' | 'free'
 export type AspectRatioType = '9:16' | '1:1' | '16:9'

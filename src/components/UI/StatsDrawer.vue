@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useTimelineStore } from '../../stores/timelineStore'
 import confetti from 'canvas-confetti'
 import {
@@ -13,12 +13,17 @@ import {
   MapPin,
   Flame,
   Award,
-  Sparkles
+  Sparkles,
+  Building2,
+  Clock,
+  ArrowRight
 } from 'lucide-vue-next'
 
 const timelineStore = useTimelineStore()
+const activeTab = ref<'overall' | 'cities'>('overall')
 
 const stats = computed(() => timelineStore.filteredStats)
+const cities = computed(() => timelineStore.availableCities)
 
 const earthLaps = computed(() => {
   const km = stats.value.totalDistanceKm
@@ -32,10 +37,14 @@ const moonPercent = computed(() => {
 
 const triggerCelebration = () => {
   confetti({
-    particleCount: 100,
-    spread: 70,
+    particleCount: 120,
+    spread: 80,
     origin: { y: 0.6 }
   })
+}
+
+const focusCity = (cityName: string) => {
+  timelineStore.selectCity(cityName)
 }
 </script>
 
@@ -44,15 +53,36 @@ const triggerCelebration = () => {
     <div class="stats-header">
       <div class="header-title">
         <BarChart3 :size="18" class="text-cyan" />
-        <h3>Travel Analytics</h3>
+        <h3>Travel Analytics & Stats</h3>
       </div>
       <button class="close-btn" @click="timelineStore.isStatsOpen = false">
         <X :size="18" />
       </button>
     </div>
 
-    <div class="stats-body">
-      <!-- Main Metric Hero Card -->
+    <!-- Navigation Tabs -->
+    <div class="stats-tabs">
+      <button
+        class="stats-tab-btn"
+        :class="{ active: activeTab === 'overall' }"
+        @click="activeTab = 'overall'"
+      >
+        <Globe2 :size="14" />
+        <span>Overall Metrics</span>
+      </button>
+      <button
+        class="stats-tab-btn"
+        :class="{ active: activeTab === 'cities' }"
+        @click="activeTab = 'cities'"
+      >
+        <Building2 :size="14" />
+        <span>City Stats ({{ cities.length }})</span>
+      </button>
+    </div>
+
+    <!-- Overall Metrics Tab -->
+    <div class="stats-body" v-if="activeTab === 'overall'">
+      <!-- Hero Metric -->
       <div class="hero-metric-card">
         <div class="metric-label">TOTAL DISTANCE TRAVELED</div>
         <div class="metric-value-huge">
@@ -118,28 +148,13 @@ const triggerCelebration = () => {
 
       <!-- Countries Visited -->
       <div class="section-title">
-        <span>Countries & Regions Visited</span>
+        <span>Countries Visited</span>
         <span class="count-badge">{{ stats.countries.length }}</span>
       </div>
       <div class="country-pill-list">
         <div v-for="c in stats.countries" :key="c" class="country-pill">
           <span class="pill-dot"></span>
           <span>{{ c }}</span>
-        </div>
-        <div v-if="stats.countries.length === 0" class="empty-hint">
-          Upload JSON or load demo to discover visited countries!
-        </div>
-      </div>
-
-      <!-- Cities Visited -->
-      <div class="section-title">
-        <span>Major Cities & Stops</span>
-        <span class="count-badge">{{ stats.cities.length }}</span>
-      </div>
-      <div class="city-pill-list">
-        <div v-for="city in stats.cities.slice(0, 20)" :key="city" class="city-pill">
-          <MapPin :size="12" />
-          <span>{{ city }}</span>
         </div>
       </div>
 
@@ -151,6 +166,58 @@ const triggerCelebration = () => {
         </button>
       </div>
     </div>
+
+    <!-- City Stats Matrix Tab -->
+    <div class="stats-body" v-else>
+      <div class="cities-grid">
+        <div
+          v-for="city in cities"
+          :key="city.name"
+          class="city-stat-card"
+        >
+          <div class="city-card-header">
+            <div class="city-card-titles">
+              <div class="city-name-row">
+                <Building2 :size="15" class="text-cyan" />
+                <span class="city-name">{{ city.name }}</span>
+              </div>
+              <span class="city-country-tag">{{ city.country }}</span>
+            </div>
+
+            <button class="city-focus-btn" @click="focusCity(city.name)">
+              <span>Explore</span>
+              <ArrowRight :size="12" />
+            </button>
+          </div>
+
+          <!-- City Metric Columns -->
+          <div class="city-metrics-row">
+            <div class="c-metric">
+              <span class="c-val">{{ (city.totalStayHours / 24).toFixed(1) }}</span>
+              <span class="c-lbl">Days Stayed</span>
+            </div>
+            <div class="c-metric">
+              <span class="c-val">{{ city.visitCount }}</span>
+              <span class="c-lbl">Visits</span>
+            </div>
+            <div class="c-metric" v-if="city.localDistanceKm > 0">
+              <span class="c-val">{{ city.localDistanceKm }}</span>
+              <span class="c-lbl">Local km</span>
+            </div>
+          </div>
+
+          <!-- Top Places in City -->
+          <div class="city-places-preview" v-if="city.topPlaces.length > 0">
+            <span class="places-lbl">Top Locations:</span>
+            <div class="places-chips">
+              <span v-for="p in city.topPlaces.slice(0, 3)" :key="p.name" class="p-chip">
+                {{ p.name }} ({{ p.count }}x)
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -159,7 +226,7 @@ const triggerCelebration = () => {
   position: absolute;
   top: 86px;
   right: 20px;
-  width: 400px;
+  width: 440px;
   max-height: calc(100vh - 120px);
   display: flex;
   flex-direction: column;
@@ -215,8 +282,43 @@ const triggerCelebration = () => {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.stats-tabs {
+  display: flex;
+  padding: 8px 16px;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.stats-tab-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.stats-tab-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.stats-tab-btn.active {
+  background: rgba(0, 240, 255, 0.15);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+
 .stats-body {
-  padding: 20px;
+  padding: 18px 20px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -340,13 +442,13 @@ const triggerCelebration = () => {
   color: var(--text-dim);
 }
 
-.country-pill-list, .city-pill-list {
+.country-pill-list {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.country-pill, .city-pill {
+.country-pill {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -365,14 +467,8 @@ const triggerCelebration = () => {
   background: var(--accent-cyan);
 }
 
-.empty-hint {
-  font-size: 12px;
-  color: var(--text-dim);
-  font-style: italic;
-}
-
 .celebrate-wrapper {
-  margin-top: 10px;
+  margin-top: 6px;
 }
 
 .celebrate-btn {
@@ -398,10 +494,132 @@ const triggerCelebration = () => {
   box-shadow: 0 6px 22px rgba(255, 215, 0, 0.5);
 }
 
-.text-cyan {
+/* City Stats Matrix */
+.cities-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.city-stat-card {
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: var(--transition-smooth);
+}
+
+.city-stat-card:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(0, 240, 255, 0.3);
+}
+
+.city-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.city-card-titles {
+  display: flex;
+  flex-direction: column;
+}
+
+.city-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.city-name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.city-country-tag {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-left: 21px;
+}
+
+.city-focus-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  background: rgba(0, 240, 255, 0.12);
+  border: 1px solid var(--accent-cyan);
+  border-radius: 9999px;
   color: var(--accent-cyan);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-smooth);
 }
-.text-purple {
-  color: var(--accent-purple);
+
+.city-focus-btn:hover {
+  background: var(--accent-cyan);
+  color: #060810;
 }
+
+.city-metrics-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+
+.c-metric {
+  display: flex;
+  flex-direction: column;
+}
+
+.c-val {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.c-lbl {
+  font-size: 9px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.city-places-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.places-lbl {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.places-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.p-chip {
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text-main);
+}
+
+.text-cyan { color: var(--accent-cyan); }
+.text-purple { color: var(--accent-purple); }
 </style>

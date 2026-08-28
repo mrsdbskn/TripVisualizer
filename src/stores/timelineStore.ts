@@ -10,7 +10,8 @@ import type {
   ActivityType,
   ActionFilters,
   CityDetail,
-  GeoPoint
+  GeoPoint,
+  MapLayerType
 } from '../types/timeline'
 import { calculateBearing, haversineDistanceKm } from '../services/geodesic'
 import { generateSampleDataset } from '../services/timelineParser'
@@ -27,7 +28,8 @@ export const useTimelineStore = defineStore('timeline', {
     loadingMessage: '',
     hasLoadedData: false,
 
-    // Visualization Config
+    // Map & Layer Config
+    mapLayer: 'satellite' as MapLayerType,
     globeTheme: 'satellite' as GlobeTheme,
     cameraMode: 'follow' as CameraMode,
     is3DRealisticGlobe: true,
@@ -55,6 +57,9 @@ export const useTimelineStore = defineStore('timeline', {
     // City Deep-Dive Drilldown
     selectedCity: null as string | null,
     isCityDrawerOpen: false,
+
+    // Trip Overview Drawer
+    isOverviewOpen: false,
 
     // Segment Activity Correction
     editingSegment: null as TimelineSegment | null,
@@ -153,20 +158,39 @@ export const useTimelineStore = defineStore('timeline', {
       }
 
       return Array.from(cityMap.values())
-        .map(c => ({
-          name: c.name,
-          country: c.country,
-          coordinates: c.coordinates,
-          visitCount: Math.max(1, c.visitCount),
-          totalStayHours: Math.round(c.totalStayHours),
-          firstVisitDate: c.firstVisitDate,
-          lastVisitDate: c.lastVisitDate,
-          segments: c.segments,
-          topPlaces: Array.from(c.placeCounts.entries())
-            .map(([name, count]) => ({ name, count }))
-            .sort((a, b) => b.count - a.count)
-            .slice(0, 10)
-        }))
+        .map(c => {
+          let localDist = 0
+          let walk = 0
+          let drive = 0
+          let train = 0
+
+          for (const s of c.segments) {
+            const km = (s.distanceMeters || 0) / 1000
+            localDist += km
+            if (s.activityType === 'WALKING' || s.activityType === 'RUNNING') walk += km
+            else if (s.activityType === 'IN_PASSENGER_VEHICLE' || s.activityType === 'IN_VEHICLE') drive += km
+            else if (s.activityType === 'IN_TRAIN' || s.activityType === 'IN_TRAM' || s.activityType === 'IN_SUBWAY') train += km
+          }
+
+          return {
+            name: c.name,
+            country: c.country,
+            coordinates: c.coordinates,
+            visitCount: Math.max(1, c.visitCount),
+            totalStayHours: Math.round(c.totalStayHours),
+            localDistanceKm: Math.round(localDist),
+            walkKm: Math.round(walk),
+            driveKm: Math.round(drive),
+            trainKm: Math.round(train),
+            firstVisitDate: c.firstVisitDate,
+            lastVisitDate: c.lastVisitDate,
+            segments: c.segments,
+            topPlaces: Array.from(c.placeCounts.entries())
+              .map(([name, count]) => ({ name, count }))
+              .sort((a, b) => b.count - a.count)
+              .slice(0, 10)
+          }
+        })
         .sort((a, b) => b.visitCount - a.visitCount)
     },
 
@@ -355,6 +379,14 @@ export const useTimelineStore = defineStore('timeline', {
 
     setTheme(theme: GlobeTheme) {
       this.globeTheme = theme
+    },
+
+    setMapLayer(layer: MapLayerType) {
+      this.mapLayer = layer
+    },
+
+    toggleOverview() {
+      this.isOverviewOpen = !this.isOverviewOpen
     },
 
     setCameraMode(mode: CameraMode) {
