@@ -4,6 +4,7 @@ import { GlobeControls } from './components/Globe/GlobeControls';
 import { TimelineBar } from './components/Timeline/TimelineBar';
 import { TelemetryHUD } from './components/Timeline/TelemetryHUD';
 import { DateFramePicker } from './components/Timeline/DateFramePicker';
+import { TripSlideshow } from './components/Timeline/TripSlideshow';
 import { Header } from './components/UI/Header';
 import { FileUploadModal } from './components/UI/FileUploadModal';
 import { StatsDrawer } from './components/UI/StatsDrawer';
@@ -20,7 +21,7 @@ import {
   StoryExportConfig,
   TripCluster,
 } from './types/timeline';
-import { Sparkles, Check, Info } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 
 export function App() {
   const initialData = getSampleTimelineData();
@@ -40,7 +41,7 @@ export function App() {
 
   // Playback state
   const [playback, setPlayback] = useState<PlaybackState>({
-    isPlaying: true, // Start playing automatically so the globe is instantly dynamic!
+    isPlaying: true, // Auto-play on mount so the globe is instantly alive
     currentTime: initialData.summary.minTime,
     speedMultiplier: 10,
     loop: true,
@@ -66,7 +67,7 @@ export function App() {
     setToastMessage(msg);
     setTimeout(() => {
       setToastMessage((curr) => (curr === msg ? null : curr));
-    }, 4000);
+    }, 4500);
   };
 
   // Canvas ref for video recording
@@ -100,8 +101,8 @@ export function App() {
     });
   };
 
-  // Handle trip selection
-  const handleSelectTrip = (trip: TripCluster) => {
+  // Handle trip selection from slide carousel or dropdown
+  const handleSelectTrip = useCallback((trip: TripCluster) => {
     const pad = 24 * 3600 * 1000;
     const start = Math.max(data.summary.minTime, trip.startDate - pad);
     const end = Math.min(data.summary.maxTime, trip.endDate + pad);
@@ -113,8 +114,8 @@ export function App() {
       currentTime: trip.startDate,
       isPlaying: true,
     }));
-    showToast(`Focused on: ${trip.title}`);
-  };
+    showToast(`✈️ Flying to: ${trip.title}`);
+  }, [data.summary.minTime, data.summary.maxTime]);
 
   // Handle new dataset loaded from file upload
   const handleDatasetLoaded = (newDataset: TimelineDataset, sourceLabel = 'Dataset') => {
@@ -138,18 +139,42 @@ export function App() {
     showToast(`✨ ${sourceLabel} Loaded (${newDataset.summary.totalPoints.toLocaleString()} points, ${newDataset.summary.flightCount} flights)`);
   };
 
-  // 1-Click Load Timeline.json directly
+  // 1-Click Load Timeline.json directly from workspace
   const handleDirectLoadTimelineJson = async () => {
-    showToast('⏳ Loading Timeline.json (99.9 MB)...');
+    showToast('⏳ Loading Timeline.json from workspace (99.9 MB)...');
     try {
       const resp = await fetch('./Timeline.json');
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const json = await resp.json();
-      const parsed = parseTimelineData(json);
+      const parsed = parseTimelineData(json, (pct, stage) => {
+        if (Math.round(pct * 100) % 25 === 0) {
+          showToast(`⏳ Processing: ${stage}`);
+        }
+      });
       handleDatasetLoaded(parsed, 'Timeline.json');
     } catch (e: any) {
       showToast('❌ Failed to load Timeline.json: ' + e.message);
     }
+  };
+
+  // Handle file selected directly from OS file browser
+  const handleFileDirectSelected = (file: File) => {
+    showToast(`⏳ Reading ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MB)...`);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        const json = JSON.parse(text);
+        const dataset = parseTimelineData(json);
+        handleDatasetLoaded(dataset, file.name);
+      } catch (err: any) {
+        showToast('❌ Failed to parse JSON: ' + err.message);
+      }
+    };
+    reader.onerror = () => {
+      showToast('❌ Failed to read file from disk');
+    };
+    reader.readAsText(file);
   };
 
   // Playback animation tick loop
@@ -191,10 +216,10 @@ export function App() {
   }, [playback.isPlaying, playback.speedMultiplier]);
 
   return (
-    <div className="relative w-screen h-screen bg-[#08090d] overflow-hidden select-none">
+    <div className="relative w-screen h-screen min-w-full min-h-full bg-[#08090d] overflow-hidden select-none">
       {/* Toast Notification Banner */}
       {toastMessage && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[120] glass-panel px-5 py-2.5 border border-cyan-400/50 bg-slate-950/90 text-cyan-300 text-xs font-mono font-bold shadow-2xl flex items-center gap-2.5 animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[120] glass-panel px-5 py-2.5 border border-cyan-400/50 bg-slate-950/95 text-cyan-300 text-xs font-mono font-bold shadow-2xl flex items-center gap-2.5 animate-in fade-in slide-in-from-top-2 duration-200">
           <Sparkles className="w-4 h-4 text-cyan-400 animate-pulse" />
           <span>{toastMessage}</span>
         </div>
@@ -213,6 +238,7 @@ export function App() {
         onOpenExportModal={() => setIsExportOpen(true)}
         onLoadDemo={() => handleDatasetLoaded(getSampleTimelineData(), 'Demo Journey')}
         onLoadTimelineJsonDirect={handleDirectLoadTimelineJson}
+        onFileDirectSelected={handleFileDirectSelected}
       />
 
       {/* 3D Globe Visualizer Main Canvas */}
@@ -253,11 +279,14 @@ export function App() {
             />
             {/* Live Telemetry HUD */}
             <TelemetryHUD data={data} playback={playback} />
+
+            {/* Interactive Journey Slide Deck Carousel */}
+            <TripSlideshow data={data} onSelectTrip={handleSelectTrip} />
           </div>
         )}
       </main>
 
-      {/* 3D Layers & Style Floating Controls */}
+      {/* 3D Layers & Style Floating Controls (Bottom Right above Timeline) */}
       <GlobeControls
         theme={theme}
         layers={layers}
