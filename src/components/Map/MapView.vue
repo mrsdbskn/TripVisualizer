@@ -2,7 +2,8 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import L from 'leaflet'
 import { useTimelineStore } from '../../stores/timelineStore'
-import type { TimelineSegment, MapLayerType } from '../../types/timeline'
+import type { TimelineSegment, MapLayerType, GeoPoint } from '../../types/timeline'
+import { fetchRealRoadRoute, generateFlightGeodesic } from '../../services/routingService'
 
 const timelineStore = useTimelineStore()
 const mapContainer = ref<HTMLElement | null>(null)
@@ -50,41 +51,10 @@ const TILE_SERVERS: Record<MapLayerType, { url: string; attribution: string }> =
   }
 }
 
-/**
- * Creates curved geodesic points for 2D flights
- */
-function createCurvedFlightLatLngs(p1: [number, number], p2: [number, number], segments: number = 32): [number, number][] {
-  const [lat1, lng1] = p1
-  const [lat2, lng2] = p2
-  const points: [number, number][] = []
-
-  // Midpoint with perpendicular offset for curved arc
-  const midLat = (lat1 + lat2) / 2
-  const midLng = (lng1 + lng2) / 2
-  const dLat = lat2 - lat1
-  const dLng = lng2 - lng1
-  const dist = Math.sqrt(dLat * dLat + dLng * dLng)
-
-  // Curve height proportional to distance
-  const curveFactor = Math.min(25, dist * 0.22)
-  const offsetLat = midLat + (dLng > 0 ? 1 : -1) * (curveFactor * 0.3)
-  const offsetLng = midLng
-
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments
-    // Quadratic Bezier interpolation
-    const lat = (1 - t) * (1 - t) * lat1 + 2 * (1 - t) * t * offsetLat + t * t * lat2
-    const lng = (1 - t) * (1 - t) * lng1 + 2 * (1 - t) * t * offsetLng + t * t * lng2
-    points.push([lat, lng])
-  }
-  return points
-}
-
 onMounted(() => {
   if (mapContainer.value) {
-    // Initialize Leaflet Map
     map = L.map(mapContainer.value, {
-      center: [30, 20],
+      center: [35, 15],
       zoom: 3,
       minZoom: 2,
       maxZoom: 18,
@@ -92,15 +62,12 @@ onMounted(() => {
       attributionControl: false
     })
 
-    // Add initial tile layer
     setTileLayer(timelineStore.mapLayer)
 
-    // Render routes
     if (timelineStore.filteredSegments.length > 0) {
       updateMapRoutes(timelineStore.filteredSegments)
     }
 
-    // Playback loop
     const tick = (now: number) => {
       playbackRaf = requestAnimationFrame(tick)
       const deltaSec = (now - lastTime) / 1000
@@ -139,7 +106,7 @@ function setTileLayer(layerKey: MapLayerType) {
   }).addTo(map)
 }
 
-function updateMapRoutes(segments: TimelineSegment[]) {
+async function updateMapRoutes(segments: TimelineSegment[]) {
   if (!map) return
 
   // Clear previous lines
@@ -154,10 +121,11 @@ function updateMapRoutes(segments: TimelineSegment[]) {
   }
   cityMarkers = []
 
+  const isOnlyCities = timelineStore.actionFilters.onlyVisitedCities
   const visitedCitiesMap = new Map<string, { lat: number; lng: number; count: number; name: string; country: string }>()
 
+  // 1. Process Visited Cities
   for (const seg of segments) {
-    // Collect city stops
     if (seg.point && seg.city && seg.city !== 'Unknown Place' && seg.city !== 'Journey') {
       const key = seg.city
       if (!visitedCitiesMap.has(key)) {
@@ -172,45 +140,9 @@ function updateMapRoutes(segments: TimelineSegment[]) {
         visitedCitiesMap.get(key)!.count++
       }
     }
-
-    // Draw activity paths
-    if (seg.type === 'activity' && seg.path.length >= 2) {
-      const isFlight = seg.activityType === 'FLYING'
-      const color = isFlight
-        ? '#00f0ff'
-        : seg.activityType === 'IN_TRAIN'
-        ? '#00ff9d'
-        : seg.activityType === 'IN_PASSENGER_VEHICLE'
-        ? '#ff9900'
-        : '#ff2a6d'
-
-      if (isFlight && seg.startPoint && seg.endPoint) {
-        const curvePoints = createCurvedFlightLatLngs(
-          [seg.startPoint.lat, seg.startPoint.lng],
-          [seg.endPoint.lat, seg.endPoint.lng]
-        )
-        const flightLine = L.polyline(curvePoints, {
-          color,
-          weight: 3.5,
-          opacity: 0.9,
-          dashArray: '8, 6',
-          lineCap: 'round'
-        }).addTo(map)
-        routePolylines.push(flightLine)
-      } else {
-        const latLngs: [number, number][] = seg.path.map(p => [p.lat, p.lng])
-        const groundLine = L.polyline(latLngs, {
-          color,
-          weight: 3.5,
-          opacity: 0.85,
-          lineJoin: 'round'
-        }).addTo(map)
-        routePolylines.push(groundLine)
-      }
-    }
   }
 
-  // Create City Pins with Name Badges
+  // 2. Render City Pins (Only major city badges in 'Only Cities' mode)
   for (const [_, city] of visitedCitiesMap) {
     const isSelected = timelineStore.selectedCity === city.name
     const iconHtml = `
@@ -234,6 +166,61 @@ function updateMapRoutes(segments: TimelineSegment[]) {
       timelineStore.selectCity(city.name)
     })
     cityMarkers.push(marker)
+  }
+
+  // 3. Render Activity Routes with Real-World Road & Geodesic Paths
+  for (const seg of segments) {
+    if (seg.type === 'activity' && seg.startPoint && seg.endPoint) {
+      const isFlight = seg.activityType === 'FLYING'
+      const isTrain = seg.activityType === 'IN_TRAIN' || seg.activityType === 'IN_TRAM' || seg.activityType === 'IN_SUBWAY'
+      const isCar = seg.activityType === 'IN_PASSENGER_VEHICLE' || seg.activityType === 'IN_VEHICLE' || seg.activityType === 'IN_BUS'
+
+      const color = isFlight
+        ? '#00f0ff'
+        : isTrain
+        ? '#00ff9d'
+        : isCar
+        ? '#ff9900'
+        : '#ff2a6d'
+
+      if (isFlight) {
+        // True curved Great-Circle flight arc
+        const flightPoints = generateFlightGeodesic(seg.startPoint, seg.endPoint)
+        const latLngs: [number, number][] = flightPoints.map(p => [p.lat, p.lng])
+        const line = L.polyline(latLngs, {
+          color,
+          weight: 3.5,
+          opacity: 0.9,
+          dashArray: '8, 6',
+          lineCap: 'round'
+        }).addTo(map)
+        routePolylines.push(line)
+      } else if (seg.path && seg.path.length > 5) {
+        // High-density recorded GPS route from Google Timeline
+        const latLngs: [number, number][] = seg.path.map(p => [p.lat, p.lng])
+        const line = L.polyline(latLngs, {
+          color,
+          weight: 3.5,
+          opacity: 0.85,
+          lineJoin: 'round'
+        }).addTo(map)
+        routePolylines.push(line)
+      } else {
+        // Real-World Highway Routing via OSRM
+        fetchRealRoadRoute(seg.startPoint, seg.endPoint, seg.activityType).then(roadPoints => {
+          if (!map) return
+          const latLngs: [number, number][] = roadPoints.map(p => [p.lat, p.lng])
+          const line = L.polyline(latLngs, {
+            color,
+            weight: 3.5,
+            opacity: 0.85,
+            lineJoin: 'round'
+          }).addTo(map)
+          routePolylines.push(line)
+          seg.path = roadPoints // Store enriched real road path
+        })
+      }
+    }
   }
 }
 
@@ -276,7 +263,6 @@ function updateVehicleMarker() {
   }
 }
 
-// Watchers
 watch(
   () => timelineStore.mapLayer,
   (newLayer) => {
@@ -285,9 +271,9 @@ watch(
 )
 
 watch(
-  () => timelineStore.filteredSegments,
-  (newSegs) => {
-    updateMapRoutes(newSegs)
+  () => [timelineStore.filteredSegments, timelineStore.actionFilters.onlyVisitedCities],
+  ([newSegs]) => {
+    updateMapRoutes(newSegs as TimelineSegment[])
   }
 )
 
@@ -307,7 +293,6 @@ watch(
 
 defineExpose({
   captureSnapshot: () => {
-    // Capture canvas snapshot for Instagram Story
     const canvas = document.createElement('canvas')
     canvas.width = 1080
     canvas.height = 1920
