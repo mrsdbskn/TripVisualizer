@@ -124,20 +124,34 @@ async function updateMapRoutes(segments: TimelineSegment[]) {
   const isOnlyCities = timelineStore.actionFilters.onlyVisitedCities
   const visitedCitiesMap = new Map<string, { lat: number; lng: number; count: number; name: string; country: string }>()
 
-  // 1. Process Visited Cities
-  for (const seg of segments) {
-    if (seg.point && seg.city && seg.city !== 'Unknown Place' && seg.city !== 'Journey') {
-      const key = seg.city
-      if (!visitedCitiesMap.has(key)) {
-        visitedCitiesMap.set(key, {
-          lat: seg.point.lat,
-          lng: seg.point.lng,
-          count: 1,
-          name: seg.city,
-          country: seg.country || ''
+  // 1. Process Visited Cities (In Only Cities mode, use the distinct available cities list)
+  if (isOnlyCities) {
+    for (const city of timelineStore.availableCities) {
+      if (city.name && city.name !== 'Unknown Place' && city.name !== 'Journey' && city.coordinates) {
+        visitedCitiesMap.set(city.name, {
+          lat: city.coordinates.lat,
+          lng: city.coordinates.lng,
+          count: city.visitCount,
+          name: city.name,
+          country: city.country
         })
-      } else {
-        visitedCitiesMap.get(key)!.count++
+      }
+    }
+  } else {
+    for (const seg of segments) {
+      if (seg.point && seg.city && seg.city !== 'Unknown Place' && seg.city !== 'Journey') {
+        const key = seg.city
+        if (!visitedCitiesMap.has(key)) {
+          visitedCitiesMap.set(key, {
+            lat: seg.point.lat,
+            lng: seg.point.lng,
+            count: 1,
+            name: seg.city,
+            country: seg.country || ''
+          })
+        } else {
+          visitedCitiesMap.get(key)!.count++
+        }
       }
     }
   }

@@ -124,12 +124,41 @@ self.onmessage = async (e: MessageEvent) => {
         const activityType = normalizeActivityType(rawType)
 
         let path: GeoPoint[] = []
+
+        // 1. Direct timelinePath on activity
         if (raw.timelinePath && Array.isArray(raw.timelinePath)) {
           for (const tp of raw.timelinePath) {
-            const p = parseCoord(tp.point)
+            const p = parseCoord(tp.point || tp.latLng)
             if (p) {
               if (tp.time) p.time = new Date(tp.time).getTime()
               path.push(p)
+            }
+          }
+        }
+
+        // 2. Simplified raw path on activity
+        if (raw.activity?.simplifiedRawPath?.points && Array.isArray(raw.activity.simplifiedRawPath.points)) {
+          for (const sp of raw.activity.simplifiedRawPath.points) {
+            const p = parseCoord(sp.latLng || sp.point)
+            if (p) path.push(p)
+          }
+        }
+
+        // 3. Waypoint path on activity
+        if (raw.activity?.waypointPath?.waypoints && Array.isArray(raw.activity.waypointPath.waypoints)) {
+          for (const wp of raw.activity.waypointPath.waypoints) {
+            const p = parseCoord(wp.latLng || wp.point)
+            if (p) path.push(p)
+          }
+        }
+
+        // 4. Look back at preceding timelinePath if current path is empty
+        if (path.length === 0 && i > 0 && rawSegments[i - 1].timelinePath) {
+          const prevTp = rawSegments[i - 1].timelinePath
+          if (Array.isArray(prevTp)) {
+            for (const tp of prevTp) {
+              const p = parseCoord(tp.point || tp.latLng)
+              if (p) path.push(p)
             }
           }
         }

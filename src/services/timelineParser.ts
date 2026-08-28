@@ -70,7 +70,7 @@ export function generateSampleDataset(): ParseResult {
   const now = Date.now()
   const oneDay = 24 * 3600 * 1000
 
-  // Waypoints for our sample tour: Zurich -> Paris -> London -> Rome -> Istanbul -> Dubai -> Tokyo -> Zurich
+  // Waypoints for our sample tour: Zurich -> Geneva -> Paris -> London -> Rome -> Istanbul -> Ankara -> Sivas -> Erzincan -> Erzurum -> Kars -> Dubai -> Tokyo
   const sampleTripPoints = [
     { name: 'Zurich', country: 'Switzerland', lat: 47.3769, lng: 8.5417 },
     { name: 'Geneva', country: 'Switzerland', lat: 46.2044, lng: 6.1432 },
@@ -78,14 +78,17 @@ export function generateSampleDataset(): ParseResult {
     { name: 'London', country: 'United Kingdom', lat: 51.5074, lng: -0.1278 },
     { name: 'Rome', country: 'Italy', lat: 41.9028, lng: 12.4964 },
     { name: 'Istanbul', country: 'Turkey', lat: 41.0082, lng: 28.9784 },
-    { name: 'Antalya', country: 'Turkey', lat: 36.8969, lng: 30.7133 },
+    { name: 'Ankara', country: 'Turkey', lat: 39.9334, lng: 32.8597 },
+    { name: 'Sivas', country: 'Turkey', lat: 39.7505, lng: 37.0150 },
+    { name: 'Erzincan', country: 'Turkey', lat: 39.7468, lng: 39.4911 },
+    { name: 'Erzurum', country: 'Turkey', lat: 39.9043, lng: 41.2679 },
+    { name: 'Kars', country: 'Turkey', lat: 40.6013, lng: 43.0975 },
     { name: 'Dubai', country: 'United Arab Emirates', lat: 25.2048, lng: 55.2708 },
-    { name: 'Tokyo', country: 'Japan', lat: 35.6762, lng: 139.6503 },
-    { name: 'Zurich', country: 'Switzerland', lat: 47.3769, lng: 8.5417 }
+    { name: 'Tokyo', country: 'Japan', lat: 35.6762, lng: 139.6503 }
   ]
 
   const segments: TimelineSegment[] = []
-  let currentTime = now - 45 * oneDay
+  let currentTime = now - 60 * oneDay
 
   // Create visits & inter-city flight/train/car activities
   for (let i = 0; i < sampleTripPoints.length - 1; i++) {
@@ -132,20 +135,30 @@ export function generateSampleDataset(): ParseResult {
       country: origin.country
     })
 
-    // 3. Travel to next destination (Flight or Train)
+    // 3. Travel to next destination (Flight, Train or Car)
     const travelStart = walkEnd + 2 * 3600 * 1000
     const travelEnd = travelStart + 4 * 3600 * 1000
-    const isFlight = i >= 2 // Flights for long distances
-    const mode = isFlight ? 'FLYING' : (i === 0 ? 'IN_TRAIN' : 'IN_PASSENGER_VEHICLE')
 
-    // Generate path points along route
-    const steps = 20
+    // Dogu Express rail line across Turkey: Ankara -> Sivas -> Erzincan -> Erzurum -> Kars
+    const isTurkishRail = origin.country === 'Turkey' && dest.country === 'Turkey' && origin.name !== 'Istanbul'
+    const isFlight = (origin.name === 'Rome' && dest.name === 'Istanbul') || (origin.name === 'Kars' && dest.name === 'Dubai') || (origin.name === 'Dubai' && dest.name === 'Tokyo')
+    const mode = isFlight ? 'FLYING' : (isTurkishRail || i === 0 ? 'IN_TRAIN' : 'IN_PASSENGER_VEHICLE')
+
+    // Generate realistic road/rail curved waypoints
+    const steps = 30
     const routePath = []
+    const dLat = dest.lat - origin.lat
+    const dLng = dest.lng - origin.lng
+    const perpLat = -dLng * (mode === 'IN_TRAIN' ? 0.06 : 0.09)
+    const perpLng = dLat * (mode === 'IN_TRAIN' ? 0.06 : 0.09)
+
     for (let s = 0; s <= steps; s++) {
       const frac = s / steps
+      const curveSine = Math.sin(frac * Math.PI)
+      const subSine = Math.sin(frac * Math.PI * 3) * 0.25
       routePath.push({
-        lat: origin.lat + (dest.lat - origin.lat) * frac,
-        lng: origin.lng + (dest.lng - origin.lng) * frac
+        lat: origin.lat + dLat * frac + (perpLat * curveSine) + (perpLat * subSine),
+        lng: origin.lng + dLng * frac + (perpLng * curveSine) + (perpLng * subSine)
       })
     }
 

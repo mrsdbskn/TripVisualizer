@@ -235,8 +235,8 @@ export const useTimelineStore = defineStore('timeline', {
       // 6. Action Filters
       const f = state.actionFilters
       if (f.onlyVisitedCities) {
-        // Only keep visits or inter-city flights/trains
-        list = list.filter(s => s.type === 'visit' || s.activityType === 'FLYING' || (s.distanceMeters && s.distanceMeters > 30000))
+        // Only keep inter-city journeys and hide all local visit dots
+        list = list.filter(s => s.type === 'activity' && ((s.distanceMeters && s.distanceMeters > 8000) || s.activityType === 'FLYING' || s.activityType === 'IN_TRAIN'))
       } else {
         list = list.filter(s => {
           if (s.type === 'visit') return f.showVisits
