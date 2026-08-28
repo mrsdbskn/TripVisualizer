@@ -33,19 +33,25 @@ const currentLocation = computed(() => {
   return seg.city ? `${seg.city}, ${seg.country}` : seg.placeName || 'Journey'
 })
 
-const modeIcon = computed(() => {
+const EMOJI_MAP: Record<string, string> = {
+  FLYING: '✈️',
+  IN_PASSENGER_VEHICLE: '🚗',
+  IN_VEHICLE: '🚗',
+  IN_TRAIN: '🚆',
+  IN_TRAM: '🚊',
+  IN_SUBWAY: '🚇',
+  IN_BUS: '🚌',
+  WALKING: '🚶',
+  RUNNING: '🏃',
+  CYCLING: '🚴',
+  IN_FERRY: '⛴️',
+  SAILING: '⛵',
+  UNKNOWN: '📍'
+}
+
+const currentEmoji = computed(() => {
   const mode = timelineStore.activeJourneyState.currentSegment?.activityType
-  switch (mode) {
-    case 'FLYING': return Plane
-    case 'IN_PASSENGER_VEHICLE':
-    case 'IN_VEHICLE': return Car
-    case 'IN_TRAIN':
-    case 'IN_TRAM':
-    case 'IN_SUBWAY': return Train
-    case 'WALKING':
-    case 'RUNNING': return Footprints
-    default: return Navigation
-  }
+  return EMOJI_MAP[mode || 'UNKNOWN'] || '📍'
 })
 </script>
 
@@ -73,7 +79,7 @@ const modeIcon = computed(() => {
     <!-- Center Floating Badges (Speedometer & Mode) -->
     <div class="story-center-widgets">
       <div class="story-pill mode-pill" v-if="exportStore.showTransportIcon">
-        <component :is="modeIcon" :size="16" class="text-cyan" />
+        <span class="story-emoji">{{ currentEmoji }}</span>
         <span>{{ timelineStore.activeJourneyState.currentSegment?.activityType || 'EXPLORING' }}</span>
       </div>
 
@@ -205,6 +211,10 @@ const modeIcon = computed(() => {
   font-weight: 700;
   color: #ffffff;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.story-emoji {
+  font-size: 16px;
 }
 
 .story-bottom {

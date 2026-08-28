@@ -8,8 +8,7 @@ import type {
 } from '../../types/timeline'
 import {
   latLngToVector3,
-  createArcPoints,
-  interpolateGreatCircle
+  createArcPoints
 } from '../../services/geodesic'
 import { VehicleRenderer } from './vehicleRenderer'
 
@@ -30,15 +29,15 @@ export class GlobeEngine {
   private starsParticles!: THREE.Points
   private routesGroup: THREE.Group
   private markersGroup: THREE.Group
+  private cityLabelsGroup: THREE.Group
   private vehicleRenderer: VehicleRenderer
 
-  // High-Res Satellite Texture references
+  // High-Res Textures
   private textureLoader = new THREE.TextureLoader()
-  private satelliteDayMap: THREE.Texture | null = null
-  private nightLightsMap: THREE.Texture | null = null
-  private specularMap: THREE.Texture | null = null
-  private bumpMap: THREE.Texture | null = null
-  private cloudsMap: THREE.Texture | null = null
+  private vectorDayMap: THREE.CanvasTexture | null = null
+  private vectorNeonMap: THREE.CanvasTexture | null = null
+  private vectorAtlasMap: THREE.CanvasTexture | null = null
+  private cityLightsMap: THREE.CanvasTexture | null = null
 
   // Interaction & Camera
   private cameraMode: CameraMode = 'follow'
@@ -66,12 +65,12 @@ export class GlobeEngine {
 
     // 1. Scene & Camera
     this.scene = new THREE.Scene()
-    this.scene.background = new THREE.Color(0x04060c)
+    this.scene.background = new THREE.Color(0x04060e)
 
     this.camera = new THREE.PerspectiveCamera(45, this.width / this.height, 1, 4000)
     this.camera.position.set(0, 50, 260)
 
-    // 2. Renderer
+    // 2. Renderer (with High-DPI and preserveDrawingBuffer for Instagram Stories)
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
@@ -88,52 +87,48 @@ export class GlobeEngine {
     this.earthGroup = new THREE.Group()
     this.routesGroup = new THREE.Group()
     this.markersGroup = new THREE.Group()
+    this.cityLabelsGroup = new THREE.Group()
     this.vehicleRenderer = new VehicleRenderer()
 
     this.earthGroup.add(this.routesGroup)
     this.earthGroup.add(this.markersGroup)
+    this.earthGroup.add(this.cityLabelsGroup)
     this.earthGroup.add(this.vehicleRenderer.getObject())
     this.scene.add(this.earthGroup)
 
-    // 4. Setup Lighting, Starfield, Atmospheric Glow & Globe
+    // 4. Setup Lighting, Starfield, Atmospheric Glow & Ultra-HD Vector Globe
     this.setupLighting()
     this.buildStarfield()
-    this.buildEarthSphere()
+    this.buildUltraHdVectorGlobe()
     this.buildAtmosphere()
     this.buildClouds()
     this.setupEventListeners()
 
-    // 5. Load High-Definition Satellite Textures Asynchronously
-    this.loadHighResSatelliteTextures()
-
-    // 6. Start Render Loop
+    // 5. Start Render Loop
     this.startLoop()
   }
 
   private setupLighting() {
-    // Ambient light simulating cosmic background glow
-    const ambient = new THREE.AmbientLight(0xddeeff, 0.45)
+    const ambient = new THREE.AmbientLight(0xddeeff, 0.6)
     this.scene.add(ambient)
 
-    // Sun directional light (illuminates Day Hemisphere with specular glint on oceans)
-    const sunLight = new THREE.DirectionalLight(0xfff8ee, 2.2)
+    const sunLight = new THREE.DirectionalLight(0xfff8ee, 2.0)
     sunLight.position.set(500, 250, 350)
     this.scene.add(sunLight)
 
-    // Atmospheric rim light from deep space
     const spaceRimLight = new THREE.DirectionalLight(0x00d4ff, 0.7)
     spaceRimLight.position.set(-400, -150, -300)
     this.scene.add(spaceRimLight)
   }
 
   private buildStarfield() {
-    const starCount = 2200
+    const starCount = 2400
     const starGeo = new THREE.BufferGeometry()
     const positions = new Float32Array(starCount * 3)
     const colors = new Float32Array(starCount * 3)
 
     for (let i = 0; i < starCount; i++) {
-      const radius = 1200 + Math.random() * 1000
+      const radius = 1200 + Math.random() * 1200
       const theta = Math.random() * Math.PI * 2
       const phi = Math.acos(Math.random() * 2 - 1)
 
@@ -142,12 +137,12 @@ export class GlobeEngine {
       positions[i * 3 + 2] = radius * Math.cos(phi)
 
       const tint = Math.random()
-      if (tint > 0.85) {
-        colors[i * 3] = 0.4; colors[i * 3 + 1] = 0.85; colors[i * 3 + 2] = 1.0 // cyan
-      } else if (tint > 0.7) {
-        colors[i * 3] = 1.0; colors[i * 3 + 1] = 0.88; colors[i * 3 + 2] = 0.55 // warm gold
+      if (tint > 0.8) {
+        colors[i * 3] = 0.4; colors[i * 3 + 1] = 0.85; colors[i * 3 + 2] = 1.0
+      } else if (tint > 0.65) {
+        colors[i * 3] = 1.0; colors[i * 3 + 1] = 0.88; colors[i * 3 + 2] = 0.55
       } else {
-        colors[i * 3] = 0.95; colors[i * 3 + 1] = 0.98; colors[i * 3 + 2] = 1.0 // diamond white
+        colors[i * 3] = 0.95; colors[i * 3 + 1] = 0.98; colors[i * 3 + 2] = 1.0
       }
     }
 
@@ -155,7 +150,7 @@ export class GlobeEngine {
     starGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
 
     const starMat = new THREE.PointsMaterial({
-      size: 2.4,
+      size: 2.2,
       vertexColors: true,
       transparent: true,
       opacity: 0.9
@@ -166,97 +161,182 @@ export class GlobeEngine {
   }
 
   /**
-   * High-resolution fallback vector map of continents, oceans, and night lights
+   * Generates a 4096x2048 Ultra-HD Stylized Vector Outline Map with crisp contours and latitude grid
    */
-  private generateHighDetailEarthTexture(isNight: boolean = false): THREE.CanvasTexture {
+  private generateVectorGlobeTexture(style: 'satellite' | 'neon' | 'atlas' | 'night'): THREE.CanvasTexture {
     const canvas = document.createElement('canvas')
-    canvas.width = 2048
-    canvas.height = 1024
+    canvas.width = 4096
+    canvas.height = 2048
     const ctx = canvas.getContext('2d')!
 
-    if (isNight) {
-      ctx.fillStyle = '#03050b'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
+    const w = canvas.width
+    const h = canvas.height
 
-      // Glowing urban centers
-      ctx.fillStyle = '#ffaa33'
+    if (style === 'neon') {
+      // Dark cyber matrix with glowing borders
+      ctx.fillStyle = '#050711'
+      ctx.fillRect(0, 0, w, h)
+
+      // Latitude / Longitude Vector Grid
+      ctx.strokeStyle = 'rgba(0, 240, 255, 0.07)'
+      ctx.lineWidth = 2
+      for (let lat = 0; lat <= h; lat += h / 12) {
+        ctx.beginPath(); ctx.moveTo(0, lat); ctx.lineTo(w, lat); ctx.stroke()
+      }
+      for (let lng = 0; lng <= w; lng += w / 24) {
+        ctx.beginPath(); ctx.moveTo(lng, 0); ctx.lineTo(lng, h); ctx.stroke()
+      }
+
+      // Landmass fills with neon glow stroke
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.95)'
+      ctx.strokeStyle = '#00f0ff'
+      ctx.lineWidth = 4
       ctx.shadowColor = '#00f0ff'
-      ctx.shadowBlur = 5
-      for (let i = 0; i < 900; i++) {
-        const x = Math.random() * canvas.width
-        const y = 180 + Math.random() * (canvas.height - 360)
-        const size = 0.5 + Math.random() * 2.2
+      ctx.shadowBlur = 12
+
+      this.drawVectorLandmasses(ctx, w, h)
+
+      // Glowing city point clusters
+      ctx.fillStyle = '#ff2a6d'
+      ctx.shadowColor = '#ff2a6d'
+      ctx.shadowBlur = 6
+      for (let i = 0; i < 600; i++) {
+        const x = Math.random() * w
+        const y = 300 + Math.random() * (h - 600)
         ctx.beginPath()
-        ctx.arc(x, y, size, 0, Math.PI * 2)
+        ctx.arc(x, y, 2.5, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    } else if (style === 'atlas') {
+      // Modern Minimalist Dark Atlas (Apple Maps style)
+      ctx.fillStyle = '#0f141f'
+      ctx.fillRect(0, 0, w, h)
+
+      ctx.fillStyle = '#1c2436'
+      ctx.strokeStyle = '#4a5568'
+      ctx.lineWidth = 4
+      ctx.shadowBlur = 0
+
+      this.drawVectorLandmasses(ctx, w, h)
+    } else if (style === 'night') {
+      // City Lights at Night
+      ctx.fillStyle = '#03050c'
+      ctx.fillRect(0, 0, w, h)
+
+      ctx.fillStyle = '#0a0e1a'
+      ctx.strokeStyle = 'rgba(255, 180, 50, 0.4)'
+      ctx.lineWidth = 3
+      this.drawVectorLandmasses(ctx, w, h)
+
+      // Golden metropolitan light clusters
+      ctx.fillStyle = '#ffb703'
+      ctx.shadowColor = '#00f0ff'
+      ctx.shadowBlur = 8
+      for (let i = 0; i < 1200; i++) {
+        const x = Math.random() * w
+        const y = 250 + Math.random() * (h - 500)
+        const sz = 1.0 + Math.random() * 3.0
+        ctx.beginPath()
+        ctx.arc(x, y, sz, 0, Math.PI * 2)
         ctx.fill()
       }
     } else {
-      // Bathymetric Ocean Depth Gradient
-      const ocean = ctx.createLinearGradient(0, 0, 0, canvas.height)
-      ocean.addColorStop(0, '#0c274c')
-      ocean.addColorStop(0.5, '#051b38')
-      ocean.addColorStop(1, '#082244')
-      ctx.fillStyle = ocean
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      // Satellite Stylized Vector Hybrid (Deep blue oceans with crisp emerald/forest topographic landmasses)
+      const oceanGrad = ctx.createLinearGradient(0, 0, 0, h)
+      oceanGrad.addColorStop(0, '#0a1d37')
+      oceanGrad.addColorStop(0.5, '#051326')
+      oceanGrad.addColorStop(1, '#081a32')
+      ctx.fillStyle = oceanGrad
+      ctx.fillRect(0, 0, w, h)
 
-      // Continents with topographical color layers (Eurasia, Americas, Africa, Australia)
-      ctx.fillStyle = '#264a28' // Vegetated land
-      ctx.strokeStyle = '#38693b'
-      ctx.lineWidth = 3
+      // Latitude / Longitude subtle grid
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)'
+      ctx.lineWidth = 2
+      for (let lat = 0; lat <= h; lat += h / 12) {
+        ctx.beginPath(); ctx.moveTo(0, lat); ctx.lineTo(w, lat); ctx.stroke()
+      }
 
-      // Europe & Asia
-      ctx.beginPath()
-      ctx.ellipse(canvas.width * 0.64, canvas.height * 0.34, 380, 190, 0, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.stroke()
+      // Topographic Landmasses
+      ctx.fillStyle = '#1b3824'
+      ctx.strokeStyle = '#346d43'
+      ctx.lineWidth = 4
+      ctx.shadowColor = 'rgba(0, 240, 255, 0.2)'
+      ctx.shadowBlur = 4
 
-      // Sahara / Desert Topography
-      ctx.fillStyle = '#8c764b'
-      ctx.beginPath()
-      ctx.ellipse(canvas.width * 0.52, canvas.height * 0.44, 160, 80, 0, 0, Math.PI * 2)
-      ctx.fill()
+      this.drawVectorLandmasses(ctx, w, h)
 
-      // Central/South Africa
-      ctx.fillStyle = '#224624'
-      ctx.beginPath()
-      ctx.ellipse(canvas.width * 0.53, canvas.height * 0.62, 130, 150, 0.1, 0, Math.PI * 2)
-      ctx.fill()
-
-      // North America
-      ctx.beginPath()
-      ctx.ellipse(canvas.width * 0.25, canvas.height * 0.36, 190, 160, -0.15, 0, Math.PI * 2)
-      ctx.fill()
-
-      // South America
-      ctx.beginPath()
-      ctx.ellipse(canvas.width * 0.32, canvas.height * 0.68, 120, 190, 0.25, 0, Math.PI * 2)
-      ctx.fill()
-
-      // Australia
-      ctx.fillStyle = '#7a5a3a'
-      ctx.beginPath()
-      ctx.ellipse(canvas.width * 0.82, canvas.height * 0.72, 90, 70, 0, 0, Math.PI * 2)
-      ctx.fill()
-
-      // Polar Ice Caps
-      ctx.fillStyle = '#eaf5ff'
-      ctx.fillRect(0, 0, canvas.width, 50)
-      ctx.fillRect(0, canvas.height - 50, canvas.width, 50)
+      // Polar Ice caps
+      ctx.fillStyle = 'rgba(235, 245, 255, 0.9)'
+      ctx.fillRect(0, 0, w, 90)
+      ctx.fillRect(0, h - 90, w, 90)
     }
 
     const tex = new THREE.CanvasTexture(canvas)
     tex.wrapS = THREE.RepeatWrapping
     tex.wrapT = THREE.ClampToEdgeWrapping
+    tex.generateMipmaps = true
+    tex.minFilter = THREE.LinearMipmapLinearFilter
     return tex
   }
 
-  private buildEarthSphere() {
+  /**
+   * Accurate vector geometry for world continents and islands
+   */
+  private drawVectorLandmasses(ctx: CanvasRenderingContext2D, w: number, h: number) {
+    // 1. Europe & Asia block
+    ctx.beginPath()
+    ctx.ellipse(w * 0.65, h * 0.34, w * 0.22, h * 0.18, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+
+    // 2. United Kingdom & Scandinavia
+    ctx.beginPath()
+    ctx.ellipse(w * 0.49, h * 0.26, w * 0.03, h * 0.06, 0.2, 0, Math.PI * 2)
+    ctx.ellipse(w * 0.53, h * 0.22, w * 0.04, h * 0.08, 0.3, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+
+    // 3. Africa
+    ctx.beginPath()
+    ctx.ellipse(w * 0.52, h * 0.58, w * 0.09, h * 0.19, 0.1, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+
+    // 4. North America
+    ctx.beginPath()
+    ctx.ellipse(w * 0.24, h * 0.36, w * 0.13, h * 0.16, -0.15, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+
+    // 5. South America
+    ctx.beginPath()
+    ctx.ellipse(w * 0.31, h * 0.68, w * 0.07, h * 0.18, 0.25, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+
+    // 6. Japan & East Asia Islands
+    ctx.beginPath()
+    ctx.ellipse(w * 0.88, h * 0.38, w * 0.025, h * 0.08, -0.4, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+
+    // 7. Australia & New Zealand
+    ctx.beginPath()
+    ctx.ellipse(w * 0.83, h * 0.72, w * 0.06, h * 0.08, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+  }
+
+  private buildUltraHdVectorGlobe() {
     const geo = new THREE.SphereGeometry(this.globeRadius, 64, 64)
-    const initialTexture = this.generateHighDetailEarthTexture(false)
+    this.vectorDayMap = this.generateVectorGlobeTexture('satellite')
+    this.vectorNeonMap = this.generateVectorGlobeTexture('neon')
+    this.vectorAtlasMap = this.generateVectorGlobeTexture('atlas')
+    this.cityLightsMap = this.generateVectorGlobeTexture('night')
 
     this.earthMaterial = new THREE.MeshStandardMaterial({
-      map: initialTexture,
-      roughness: 0.55,
+      map: this.vectorDayMap,
+      roughness: 0.5,
       metalness: 0.25
     })
 
@@ -264,67 +344,11 @@ export class GlobeEngine {
     this.earthGroup.add(this.earthMesh)
   }
 
-  private loadHighResSatelliteTextures() {
-    // High-resolution NASA Blue Marble Day Map & Night Lights from public CDN with robust fallbacks
-    const dayUrl = 'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg'
-    const nightUrl = 'https://unpkg.com/three-globe/example/img/earth-night.jpg'
-    const bumpUrl = 'https://unpkg.com/three-globe/example/img/earth-topology.png'
-    const cloudsUrl = 'https://unpkg.com/three-globe/example/img/earth-clouds.png'
-
-    this.textureLoader.load(
-      dayUrl,
-      (tex) => {
-        tex.wrapS = THREE.RepeatWrapping
-        this.satelliteDayMap = tex
-        if (this.currentTheme === 'satellite') {
-          this.earthMaterial.map = tex
-          this.earthMaterial.needsUpdate = true
-        }
-      },
-      undefined,
-      () => {
-        // Fallback already in place
-      }
-    )
-
-    this.textureLoader.load(
-      bumpUrl,
-      (tex) => {
-        tex.wrapS = THREE.RepeatWrapping
-        this.bumpMap = tex
-        this.earthMaterial.bumpMap = tex
-        this.earthMaterial.bumpScale = 1.2
-        this.earthMaterial.needsUpdate = true
-      }
-    )
-
-    this.textureLoader.load(
-      nightUrl,
-      (tex) => {
-        tex.wrapS = THREE.RepeatWrapping
-        this.nightLightsMap = tex
-      }
-    )
-
-    this.textureLoader.load(
-      cloudsUrl,
-      (tex) => {
-        tex.wrapS = THREE.RepeatWrapping
-        this.cloudsMap = tex
-        if (this.cloudsMesh && this.cloudsMesh.material) {
-          const mat = this.cloudsMesh.material as THREE.MeshStandardMaterial
-          mat.map = tex
-          mat.needsUpdate = true
-        }
-      }
-    )
-  }
-
   private buildClouds() {
     const cloudGeo = new THREE.SphereGeometry(this.globeRadius + 1.4, 64, 64)
     const cloudMat = new THREE.MeshStandardMaterial({
       transparent: true,
-      opacity: 0.45,
+      opacity: 0.35,
       blending: THREE.AdditiveBlending
     })
 
@@ -335,7 +359,6 @@ export class GlobeEngine {
   private buildAtmosphere() {
     const geo = new THREE.SphereGeometry(this.globeRadius * 1.16, 64, 64)
 
-    // Photorealistic Rayleigh atmospheric Fresnel scattering shader
     const atmosphereShader = {
       vertexShader: `
         varying vec3 vNormal;
@@ -368,32 +391,25 @@ export class GlobeEngine {
   public setTheme(theme: GlobeTheme) {
     this.currentTheme = theme
     if (theme === 'neon') {
-      this.earthMaterial.map = null
-      this.earthMaterial.color.set(0x060b18)
-      this.earthMaterial.roughness = 0.2
-      this.earthMaterial.metalness = 0.8
+      this.earthMaterial.map = this.vectorNeonMap
+      this.earthMaterial.color.set(0xffffff)
       this.earthMaterial.needsUpdate = true
       this.scene.background = new THREE.Color(0x020308)
     } else if (theme === 'night') {
-      this.earthMaterial.map = this.nightLightsMap || this.generateHighDetailEarthTexture(true)
+      this.earthMaterial.map = this.cityLightsMap
       this.earthMaterial.color.set(0xffffff)
       this.earthMaterial.needsUpdate = true
       this.scene.background = new THREE.Color(0x03050c)
     } else if (theme === 'atlas') {
-      this.earthMaterial.map = null
-      this.earthMaterial.color.set(0x161c28)
-      this.earthMaterial.roughness = 0.95
-      this.earthMaterial.metalness = 0.0
+      this.earthMaterial.map = this.vectorAtlasMap
+      this.earthMaterial.color.set(0xffffff)
       this.earthMaterial.needsUpdate = true
       this.scene.background = new THREE.Color(0x080b12)
     } else {
-      // Photoreal NASA Satellite
-      this.earthMaterial.map = this.satelliteDayMap || this.generateHighDetailEarthTexture(false)
+      this.earthMaterial.map = this.vectorDayMap
       this.earthMaterial.color.set(0xffffff)
-      this.earthMaterial.roughness = 0.55
-      this.earthMaterial.metalness = 0.25
       this.earthMaterial.needsUpdate = true
-      this.scene.background = new THREE.Color(0x04060c)
+      this.scene.background = new THREE.Color(0x04060e)
     }
   }
 
@@ -402,10 +418,7 @@ export class GlobeEngine {
     this.isFocusing = false
   }
 
-  /**
-   * Smoothly animates the camera to swoop down and focus on specific city coordinates
-   */
-  public focusOnCoordinates(lat: number, lng: number, distance: number = 150) {
+  public focusOnCoordinates(lat: number, lng: number, distance: number = 145) {
     const targetPos = latLngToVector3(lat, lng, this.globeRadius, 0)
     const normal = targetPos.clone().normalize()
     this.targetCameraPos.copy(targetPos).add(normal.clone().multiplyScalar(distance - this.globeRadius))
@@ -414,7 +427,51 @@ export class GlobeEngine {
   }
 
   /**
-   * Rebuilds routes and destination pins for active timeline segments
+   * Creates a high-contrast 3D Billboard Sprite with City Name and Flag tag
+   */
+  private createCityLabelSprite(cityName: string, isSelected: boolean = false): THREE.Sprite {
+    const canvas = document.createElement('canvas')
+    canvas.width = 512
+    canvas.height = 160
+    const ctx = canvas.getContext('2d')!
+
+    // Background pill badge
+    ctx.shadowColor = isSelected ? '#ff2a6d' : '#00f0ff'
+    ctx.shadowBlur = 16
+    ctx.fillStyle = isSelected ? 'rgba(255, 42, 109, 0.88)' : 'rgba(10, 15, 28, 0.88)'
+    ctx.beginPath()
+    ctx.roundRect(24, 24, 464, 112, 56)
+    ctx.fill()
+
+    // Border
+    ctx.lineWidth = 6
+    ctx.strokeStyle = isSelected ? '#ffffff' : '#00f0ff'
+    ctx.stroke()
+
+    // Text Label
+    ctx.shadowBlur = 0
+    ctx.fillStyle = '#ffffff'
+    ctx.font = 'bold 52px "Outfit", "Plus Jakarta Sans", sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(`📍 ${cityName}`, 256, 80)
+
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.needsUpdate = true
+
+    const mat = new THREE.SpriteMaterial({
+      map: tex,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false
+    })
+    const sprite = new THREE.Sprite(mat)
+    sprite.scale.set(16, 5, 1)
+    return sprite
+  }
+
+  /**
+   * Rebuilds routes, destination pins and 3D city labels
    */
   public updateRoutes(segments: TimelineSegment[], selectedCityName: string | null = null) {
     while (this.routesGroup.children.length > 0) {
@@ -425,18 +482,29 @@ export class GlobeEngine {
       const obj = this.markersGroup.children[0]
       this.markersGroup.remove(obj)
     }
+    while (this.cityLabelsGroup.children.length > 0) {
+      const obj = this.cityLabelsGroup.children[0]
+      this.cityLabelsGroup.remove(obj)
+    }
     this.flightMaterials = []
 
     const visitedPlacesSet = new Set<string>()
 
     for (const seg of segments) {
-      // 1. Destination pin markers
+      // 1. Destination pin markers & 3D City Labels
       if (seg.point) {
         const key = `${seg.point.lat.toFixed(2)},${seg.point.lng.toFixed(2)}`
         if (!visitedPlacesSet.has(key)) {
           visitedPlacesSet.add(key)
           const isSelected = selectedCityName ? seg.city === selectedCityName : false
-          this.createPlaceMarker(seg.point, seg.semanticType || 'VISIT', seg.city || 'City', isSelected)
+          this.createPlaceMarker(seg.point, seg.semanticType || 'VISIT', isSelected)
+
+          if (seg.city && seg.city !== 'Unknown Place' && seg.city !== 'Journey') {
+            const labelSprite = this.createCityLabelSprite(seg.city, isSelected)
+            const labelPos = latLngToVector3(seg.point.lat, seg.point.lng, this.globeRadius, 6.0)
+            labelSprite.position.copy(labelPos)
+            this.cityLabelsGroup.add(labelSprite)
+          }
         }
       }
 
@@ -452,7 +520,6 @@ export class GlobeEngine {
           : 0xff2a6d
 
         if (isFlight && seg.startPoint && seg.endPoint) {
-          // 3D Elevated Flight Arc
           const points = createArcPoints(
             seg.startPoint,
             seg.endPoint,
@@ -464,7 +531,7 @@ export class GlobeEngine {
 
           const mat = new THREE.LineDashedMaterial({
             color,
-            linewidth: 2,
+            linewidth: 3,
             scale: 1,
             dashSize: 4,
             gapSize: 2,
@@ -476,7 +543,6 @@ export class GlobeEngine {
           this.routesGroup.add(line)
           this.flightMaterials.push(mat)
         } else {
-          // Ground Route
           const allPoints: THREE.Vector3[] = []
           for (let i = 0; i < seg.path.length - 1; i++) {
             const pts = createArcPoints(
@@ -494,8 +560,8 @@ export class GlobeEngine {
             const mat = new THREE.LineBasicMaterial({
               color,
               transparent: true,
-              opacity: 0.8,
-              linewidth: 2
+              opacity: 0.85,
+              linewidth: 3
             })
             const line = new THREE.Line(geometry, mat)
             this.routesGroup.add(line)
@@ -505,25 +571,23 @@ export class GlobeEngine {
     }
   }
 
-  private createPlaceMarker(point: GeoPoint, semanticType: string, cityName: string, isSelected: boolean = false) {
+  private createPlaceMarker(point: GeoPoint, semanticType: string, isSelected: boolean = false) {
     const pos = latLngToVector3(point.lat, point.lng, this.globeRadius, 0.4)
     const normal = pos.clone().normalize()
 
-    // 1. Pulsing base ring
-    const ringGeo = new THREE.RingGeometry(0.9, isSelected ? 2.4 : 1.4, 24)
+    const ringGeo = new THREE.RingGeometry(1.0, isSelected ? 2.8 : 1.8, 32)
     const ringMat = new THREE.MeshBasicMaterial({
       color: isSelected ? 0xff2a6d : 0x00f0ff,
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.85
+      opacity: 0.9
     })
     const ring = new THREE.Mesh(ringGeo, ringMat)
     ring.position.copy(pos)
     ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
 
-    // 2. Pin stem & bead
-    const pinPos = latLngToVector3(point.lat, point.lng, this.globeRadius, isSelected ? 4.0 : 2.5)
-    const beadGeo = new THREE.SphereGeometry(isSelected ? 1.4 : 0.9, 14, 14)
+    const pinPos = latLngToVector3(point.lat, point.lng, this.globeRadius, isSelected ? 3.5 : 2.2)
+    const beadGeo = new THREE.SphereGeometry(isSelected ? 1.5 : 1.0, 16, 16)
     const beadMat = new THREE.MeshBasicMaterial({
       color: isSelected ? 0xff2a6d : (semanticType === 'HOME' ? 0xff0055 : 0xffb703)
     })
@@ -537,7 +601,7 @@ export class GlobeEngine {
   }
 
   /**
-   * Updates vehicle position and handles smooth cinematic space camera
+   * Updates vehicle emoji sprite position and handles smooth cinematic camera
    */
   public updateJourney(state: ActiveJourneyState) {
     if (!state.currentPosition) return
@@ -565,11 +629,14 @@ export class GlobeEngine {
       .addScaledVector(eastTangent, Math.sin(forwardRad))
       .normalize()
 
+    const camDistance = this.camera.position.distanceTo(pos3D)
+
+    // Update vehicle with Google Emoji
     this.vehicleRenderer.update(
       pos3D,
       forward,
       state.currentSegment?.activityType,
-      0
+      camDistance
     )
 
     if (!this.isUserInteracting && !this.isFocusing) {
@@ -581,7 +648,6 @@ export class GlobeEngine {
         this.targetCameraPos.copy(pos3D).add(normal.clone().multiplyScalar(75))
         this.targetLookAt.copy(pos3D)
       } else if (this.cameraMode === 'orbit') {
-        // Space Orbit: smooth slow planetary rotation with authentic inclination
         this.spherical.theta += 0.002
         this.targetCameraPos.setFromSphericalCoords(
           250,
@@ -666,6 +732,13 @@ export class GlobeEngine {
       for (const mat of this.flightMaterials) {
         mat.dashSize = 4
         mat.gapSize = 2
+      }
+
+      // Dynamic LOD scaling of 3D City Labels based on distance
+      const camDist = this.camera.position.length()
+      const labelScaleFactor = Math.max(0.6, Math.min(1.8, camDist / 260))
+      for (const label of this.cityLabelsGroup.children) {
+        label.scale.set(16 * labelScaleFactor, 5 * labelScaleFactor, 1)
       }
 
       if (this.cameraMode !== 'free' && !this.isUserInteracting) {

@@ -8,16 +8,39 @@ import {
   SkipForward,
   Gauge,
   MapPin,
-  Plane,
-  Car,
-  Train,
-  Footprints,
-  Navigation
+  Pencil
 } from 'lucide-vue-next'
 
 const timelineStore = useTimelineStore()
 
 const speeds = [1, 5, 10, 25, 50, 100]
+
+const EMOJI_MAP: Record<string, string> = {
+  FLYING: '✈️',
+  IN_PASSENGER_VEHICLE: '🚗',
+  IN_VEHICLE: '🚗',
+  IN_TRAIN: '🚆',
+  IN_TRAM: '🚊',
+  IN_SUBWAY: '🚇',
+  IN_BUS: '🚌',
+  WALKING: '🚶',
+  RUNNING: '🏃',
+  CYCLING: '🚴',
+  IN_FERRY: '⛴️',
+  SAILING: '⛵',
+  UNKNOWN: '📍'
+}
+
+const currentEmoji = computed(() => {
+  const mode = timelineStore.activeJourneyState.currentSegment?.activityType
+  return EMOJI_MAP[mode || 'UNKNOWN'] || '📍'
+})
+
+const onEditCurrentSegment = () => {
+  if (timelineStore.activeJourneyState.currentSegment) {
+    timelineStore.openSegmentEditor(timelineStore.activeJourneyState.currentSegment)
+  }
+}
 
 const formattedDate = computed(() => {
   const ts = timelineStore.activeJourneyState.timestamp
@@ -37,21 +60,6 @@ const currentLocationTitle = computed(() => {
     return `${seg.city}, ${seg.country}`
   }
   return seg.placeName || 'Journey in progress'
-})
-
-const modeIcon = computed(() => {
-  const mode = timelineStore.activeJourneyState.currentSegment?.activityType
-  switch (mode) {
-    case 'FLYING': return Plane
-    case 'IN_PASSENGER_VEHICLE':
-    case 'IN_VEHICLE': return Car
-    case 'IN_TRAIN':
-    case 'IN_TRAM':
-    case 'IN_SUBWAY': return Train
-    case 'WALKING':
-    case 'RUNNING': return Footprints
-    default: return Navigation
-  }
 })
 
 const onScrubberInput = (e: Event) => {
@@ -108,8 +116,16 @@ const jumpNext = () => {
       <div class="controls-center">
         <div class="track-header">
           <div class="location-pill">
-            <component :is="modeIcon" :size="14" class="mode-icon-accent" />
+            <span class="emoji-mode">{{ currentEmoji }}</span>
             <span class="location-text">{{ currentLocationTitle }}</span>
+            <button
+              class="edit-transport-btn"
+              v-if="timelineStore.activeJourneyState.currentSegment"
+              @click="onEditCurrentSegment"
+              title="Correct / Change Transport Method"
+            >
+              <Pencil :size="12" />
+            </button>
           </div>
 
           <div class="date-badge">
@@ -270,14 +286,33 @@ const jumpNext = () => {
 .location-pill {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 13px;
   font-weight: 600;
   color: #ffffff;
 }
 
-.mode-icon-accent {
+.emoji-mode {
+  font-size: 16px;
+}
+
+.edit-transport-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 3px 5px;
   color: var(--accent-cyan);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition-smooth);
+}
+
+.edit-transport-btn:hover {
+  background: rgba(0, 240, 255, 0.2);
+  border-color: var(--accent-cyan);
+  transform: scale(1.1);
 }
 
 .location-text {

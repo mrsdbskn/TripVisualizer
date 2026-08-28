@@ -1,41 +1,56 @@
 import * as THREE from 'three'
 import type { ActivityType } from '../../types/timeline'
 
+const EMOJI_MAP: Record<string, string> = {
+  FLYING: '✈️',
+  IN_PASSENGER_VEHICLE: '🚗',
+  IN_VEHICLE: '🚗',
+  IN_TAXI: '🚕',
+  MOTORCYCLING: '🏍️',
+  IN_TRAIN: '🚆',
+  IN_TRAM: '🚊',
+  IN_SUBWAY: '🚇',
+  IN_BUS: '🚌',
+  WALKING: '🚶',
+  RUNNING: '🏃',
+  CYCLING: '🚴',
+  IN_FERRY: '⛴️',
+  SAILING: '⛵',
+  BOATING: '🚤',
+  SKIING: '⛷️',
+  UNKNOWN: '📍'
+}
+
 /**
- * Creates 3D Procedural Mesh models for transport vehicles (Airplane, Car, Train, Ship, Walker)
+ * Creates high-visibility Google Emoji Billboard Sprite with glowing badge & particle contrail
  */
 export class VehicleRenderer {
   private group: THREE.Group
-  private planeMesh: THREE.Group
-  private carMesh: THREE.Group
-  private trainMesh: THREE.Group
-  private shipMesh: THREE.Group
-  private walkMesh: THREE.Group
+  private spriteGroup: THREE.Group
+  private activeSprite: THREE.Sprite | null = null
+  private spriteCache: Map<string, THREE.Sprite> = new Map()
+  private pulseRingMesh: THREE.Mesh
   private trailGeometry: THREE.BufferGeometry
   private trailLine: THREE.Line
   private trailPositions: Float32Array
-  private trailCount = 40
+  private trailCount = 50
   private trailIndex = 0
 
   constructor() {
     this.group = new THREE.Group()
+    this.spriteGroup = new THREE.Group()
+    this.group.add(this.spriteGroup)
 
-    // 1. Airplane Mesh (Sleek Modern Jet)
-    this.planeMesh = this.createAirplane()
-    // 2. Car Mesh (Sleek Modern Roadster)
-    this.carMesh = this.createCar()
-    // 3. Train Mesh (Bullet Train)
-    this.trainMesh = this.createTrain()
-    // 4. Ship / Ferry Mesh
-    this.shipMesh = this.createShip()
-    // 5. Walker / Bicycle Mesh (Pulsing Avatar Beacon)
-    this.walkMesh = this.createWalker()
-
-    this.group.add(this.planeMesh)
-    this.group.add(this.carMesh)
-    this.group.add(this.trainMesh)
-    this.group.add(this.shipMesh)
-    this.group.add(this.walkMesh)
+    // Glowing Pulse Ring beneath vehicle
+    const ringGeo = new THREE.RingGeometry(1.6, 2.4, 32)
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0x00f0ff,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.85
+    })
+    this.pulseRingMesh = new THREE.Mesh(ringGeo, ringMat)
+    this.group.add(this.pulseRingMesh)
 
     // Contrail / Light Ribbon Trail
     this.trailPositions = new Float32Array(this.trailCount * 3)
@@ -48,250 +63,119 @@ export class VehicleRenderer {
     const trailMaterial = new THREE.LineBasicMaterial({
       color: 0x00f0ff,
       transparent: true,
-      opacity: 0.85,
-      linewidth: 2
+      opacity: 0.9,
+      linewidth: 3
     })
     this.trailLine = new THREE.Line(this.trailGeometry, trailMaterial)
     this.group.add(this.trailLine)
 
-    this.hideAll()
+    // Pre-cache primary emojis
+    this.getOrCreateSprite('FLYING')
+    this.getOrCreateSprite('IN_PASSENGER_VEHICLE')
+    this.getOrCreateSprite('IN_TRAIN')
+    this.getOrCreateSprite('WALKING')
   }
 
   public getObject(): THREE.Group {
     return this.group
   }
 
-  private hideAll() {
-    this.planeMesh.visible = false
-    this.carMesh.visible = false
-    this.trainMesh.visible = false
-    this.shipMesh.visible = false
-    this.walkMesh.visible = false
+  /**
+   * Generates an Ultra-Crisp HD Google Emoji Canvas Texture (512x512)
+   */
+  private createEmojiTexture(emoji: string, bgColor: string = 'rgba(13, 17, 28, 0.85)', glowColor: string = '#00f0ff'): THREE.CanvasTexture {
+    const canvas = document.createElement('canvas')
+    canvas.width = 512
+    canvas.height = 512
+    const ctx = canvas.getContext('2d')!
+
+    // Circular glowing badge container
+    ctx.shadowColor = glowColor
+    ctx.shadowBlur = 24
+    ctx.fillStyle = bgColor
+    ctx.beginPath()
+    ctx.arc(256, 256, 200, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Vibrant border ring
+    ctx.lineWidth = 14
+    ctx.strokeStyle = glowColor
+    ctx.stroke()
+
+    // Draw Google / System Emoji
+    ctx.shadowBlur = 0
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.font = '240px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif'
+    ctx.fillText(emoji, 256, 268)
+
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.needsUpdate = true
+    return tex
   }
 
-  private createAirplane(): THREE.Group {
-    const group = new THREE.Group()
+  private getOrCreateSprite(activityType: string): THREE.Sprite {
+    if (this.spriteCache.has(activityType)) {
+      return this.spriteCache.get(activityType)!
+    }
 
-    // Fuselage
-    const bodyGeo = new THREE.ConeGeometry(0.8, 4.0, 16)
-    bodyGeo.rotateX(Math.PI / 2)
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      metalness: 0.8,
-      roughness: 0.2,
-      emissive: 0x112233
+    const emoji = EMOJI_MAP[activityType] || '📍'
+    let glow = '#00f0ff'
+    if (activityType === 'FLYING') glow = '#00f0ff'
+    else if (activityType === 'IN_PASSENGER_VEHICLE' || activityType === 'IN_VEHICLE') glow = '#ff9900'
+    else if (activityType === 'IN_TRAIN' || activityType === 'IN_TRAM' || activityType === 'IN_SUBWAY') glow = '#00ff9d'
+    else if (activityType === 'WALKING' || activityType === 'RUNNING') glow = '#ff2a6d'
+
+    const tex = this.createEmojiTexture(emoji, 'rgba(10, 14, 26, 0.9)', glow)
+    const mat = new THREE.SpriteMaterial({
+      map: tex,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false
     })
-    const body = new THREE.Mesh(bodyGeo, bodyMat)
+    const sprite = new THREE.Sprite(mat)
+    sprite.scale.set(10, 10, 1)
 
-    // Wings
-    const wingGeo = new THREE.BoxGeometry(5.0, 0.12, 1.2)
-    const wingMat = new THREE.MeshStandardMaterial({
-      color: 0x00f0ff,
-      emissive: 0x0066aa,
-      metalness: 0.6,
-      roughness: 0.3
-    })
-    const wings = new THREE.Mesh(wingGeo, wingMat)
-    wings.position.set(0, 0, -0.3)
-
-    // Tail fin
-    const tailGeo = new THREE.BoxGeometry(0.1, 1.2, 1.0)
-    const tailMat = new THREE.MeshStandardMaterial({ color: 0xff0055, emissive: 0xaa0033 })
-    const tail = new THREE.Mesh(tailGeo, tailMat)
-    tail.position.set(0, 0.6, -1.6)
-
-    // Jet Engine Glow
-    const glowGeo = new THREE.SphereGeometry(0.35, 12, 12)
-    const glowMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff })
-    const glow = new THREE.Mesh(glowGeo, glowMat)
-    glow.position.set(0, 0, -2.0)
-
-    group.add(body)
-    group.add(wings)
-    group.add(tail)
-    group.add(glow)
-    group.scale.set(0.65, 0.65, 0.65)
-
-    return group
-  }
-
-  private createCar(): THREE.Group {
-    const group = new THREE.Group()
-    const bodyGeo = new THREE.BoxGeometry(1.6, 0.8, 3.2)
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: 0xff9900,
-      metalness: 0.7,
-      roughness: 0.2
-    })
-    const body = new THREE.Mesh(bodyGeo, bodyMat)
-    body.position.y = 0.4
-
-    // Roof
-    const roofGeo = new THREE.BoxGeometry(1.3, 0.6, 1.8)
-    const roofMat = new THREE.MeshStandardMaterial({
-      color: 0x111122,
-      roughness: 0.1,
-      metalness: 0.9
-    })
-    const roof = new THREE.Mesh(roofGeo, roofMat)
-    roof.position.set(0, 0.9, -0.2)
-
-    // Headlights
-    const lightGeo = new THREE.SphereGeometry(0.2, 8, 8)
-    const lightMat = new THREE.MeshBasicMaterial({ color: 0x00ffff })
-    const lightL = new THREE.Mesh(lightGeo, lightMat)
-    lightL.position.set(0.6, 0.4, 1.6)
-    const lightR = new THREE.Mesh(lightGeo, lightMat)
-    lightR.position.set(-0.6, 0.4, 1.6)
-
-    group.add(body)
-    group.add(roof)
-    group.add(lightL)
-    group.add(lightR)
-    group.scale.set(0.5, 0.5, 0.5)
-
-    return group
-  }
-
-  private createTrain(): THREE.Group {
-    const group = new THREE.Group()
-    const carGeo = new THREE.BoxGeometry(1.4, 1.2, 5.0)
-    const carMat = new THREE.MeshStandardMaterial({
-      color: 0x00ff9d,
-      emissive: 0x004422,
-      metalness: 0.5,
-      roughness: 0.3
-    })
-    const car = new THREE.Mesh(carGeo, carMat)
-    car.position.y = 0.6
-
-    // Nose cone
-    const noseGeo = new THREE.ConeGeometry(0.8, 1.6, 16)
-    noseGeo.rotateX(Math.PI / 2)
-    const noseMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.8 })
-    const nose = new THREE.Mesh(noseGeo, noseMat)
-    nose.position.set(0, 0.6, 3.2)
-
-    group.add(car)
-    group.add(nose)
-    group.scale.set(0.5, 0.5, 0.5)
-    return group
-  }
-
-  private createShip(): THREE.Group {
-    const group = new THREE.Group()
-    const hullGeo = new THREE.ConeGeometry(1.2, 4.2, 8)
-    hullGeo.rotateX(Math.PI / 2)
-    const hullMat = new THREE.MeshStandardMaterial({ color: 0x0099ff, roughness: 0.3 })
-    const hull = new THREE.Mesh(hullGeo, hullMat)
-    hull.position.y = 0.3
-
-    const deckGeo = new THREE.BoxGeometry(1.0, 0.8, 2.0)
-    const deckMat = new THREE.MeshStandardMaterial({ color: 0xffffff })
-    const deck = new THREE.Mesh(deckGeo, deckMat)
-    deck.position.set(0, 0.8, -0.4)
-
-    group.add(hull)
-    group.add(deck)
-    group.scale.set(0.5, 0.5, 0.5)
-    return group
-  }
-
-  private createWalker(): THREE.Group {
-    const group = new THREE.Group()
-
-    // Pulsing energetic avatar sphere with concentric ring
-    const sphereGeo = new THREE.SphereGeometry(1.0, 16, 16)
-    const sphereMat = new THREE.MeshBasicMaterial({
-      color: 0x00f0ff,
-      wireframe: false
-    })
-    const sphere = new THREE.Mesh(sphereGeo, sphereMat)
-
-    const ringGeo = new THREE.RingGeometry(1.4, 1.8, 24)
-    ringGeo.rotateX(-Math.PI / 2)
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xff2a6d,
-      side: THREE.DoubleSide
-    })
-    const ring = new THREE.Mesh(ringGeo, ringMat)
-
-    group.add(sphere)
-    group.add(ring)
-    group.scale.set(0.4, 0.4, 0.4)
-    return group
+    this.spriteCache.set(activityType, sprite)
+    this.spriteGroup.add(sprite)
+    return sprite
   }
 
   /**
-   * Updates vehicle position, rotation, and particle contrail
+   * Updates vehicle position, Google emoji sprite, and contrail
    */
   public update(
     position: THREE.Vector3,
     direction: THREE.Vector3,
     activityType: ActivityType | undefined,
-    bankingAngle: number = 0
+    cameraDistance: number = 260
   ) {
-    this.hideAll()
+    const key = activityType || 'UNKNOWN'
+    const sprite = this.getOrCreateSprite(key)
 
-    let activeMesh: THREE.Group = this.planeMesh
-
-    switch (activityType) {
-      case 'FLYING':
-        this.planeMesh.visible = true
-        activeMesh = this.planeMesh
-        break
-      case 'IN_PASSENGER_VEHICLE':
-      case 'IN_VEHICLE':
-      case 'MOTORCYCLING':
-      case 'IN_TAXI':
-        this.carMesh.visible = true
-        activeMesh = this.carMesh
-        break
-      case 'IN_TRAIN':
-      case 'IN_TRAM':
-      case 'IN_SUBWAY':
-        this.trainMesh.visible = true
-        activeMesh = this.trainMesh
-        break
-      case 'IN_FERRY':
-      case 'SAILING':
-      case 'BOATING':
-        this.shipMesh.visible = true
-        activeMesh = this.shipMesh
-        break
-      case 'WALKING':
-      case 'RUNNING':
-      case 'CYCLING':
-      case 'SKIING':
-      default:
-        this.walkMesh.visible = true
-        activeMesh = this.walkMesh
-        break
+    // Hide all sprites except current
+    for (const [_, s] of this.spriteCache) {
+      s.visible = false
     }
+    sprite.visible = true
+    this.activeSprite = sprite
 
-    // Set position
-    activeMesh.position.copy(position)
+    // Dynamic LOD scale based on camera distance (ensures it's always readable)
+    const dynamicScale = Math.max(7, Math.min(22, (cameraDistance / 260) * 11))
+    sprite.scale.set(dynamicScale, dynamicScale, 1)
 
-    // Calculate orientation relative to sphere normal & forward direction
-    const up = position.clone().normalize()
-    const forward = direction.clone().normalize()
-    const right = new THREE.Vector3().crossVectors(up, forward).normalize()
-    const correctedForward = new THREE.Vector3().crossVectors(right, up).normalize()
+    // Position sprite slightly above sphere normal
+    const normal = position.clone().normalize()
+    const elevatedPos = position.clone().add(normal.clone().multiplyScalar(1.5))
+    sprite.position.copy(elevatedPos)
 
-    const rotMatrix = new THREE.Matrix4()
-    rotMatrix.makeBasis(right, up, correctedForward)
-    activeMesh.quaternion.setFromRotationMatrix(rotMatrix)
+    // Position Pulse Ring
+    this.pulseRingMesh.position.copy(position)
+    this.pulseRingMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
+    const ringScale = (dynamicScale / 11) * 1.2
+    this.pulseRingMesh.scale.set(ringScale, ringScale, ringScale)
 
-    // Apply banking roll on turns
-    if (activityType === 'FLYING' && Math.abs(bankingAngle) > 0.01) {
-      const rollQuat = new THREE.Quaternion().setFromAxisAngle(
-        correctedForward,
-        bankingAngle
-      )
-      activeMesh.quaternion.multiply(rollQuat)
-    }
-
-    // Update contrail line
+    // Update Contrail ribbon
     this.trailPositions[this.trailIndex * 3] = position.x
     this.trailPositions[this.trailIndex * 3 + 1] = position.y
     this.trailPositions[this.trailIndex * 3 + 2] = position.z

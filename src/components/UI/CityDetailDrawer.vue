@@ -56,18 +56,28 @@ const formatDuration = (mins: number) => {
   return `${mins} mins`
 }
 
-const getModeIcon = (mode?: string) => {
-  switch (mode) {
-    case 'FLYING': return Plane
-    case 'IN_PASSENGER_VEHICLE':
-    case 'IN_VEHICLE': return Car
-    case 'IN_TRAIN':
-    case 'IN_TRAM':
-    case 'IN_SUBWAY': return Train
-    case 'WALKING':
-    case 'RUNNING': return Footprints
-    default: return MapPin
-  }
+const EMOJI_MAP: Record<string, string> = {
+  FLYING: '✈️',
+  IN_PASSENGER_VEHICLE: '🚗',
+  IN_VEHICLE: '🚗',
+  IN_TRAIN: '🚆',
+  IN_TRAM: '🚊',
+  IN_SUBWAY: '🚇',
+  IN_BUS: '🚌',
+  WALKING: '🚶',
+  RUNNING: '🏃',
+  CYCLING: '🚴',
+  IN_FERRY: '⛴️',
+  SAILING: '⛵',
+  UNKNOWN: '📍'
+}
+
+const getEmoji = (type?: string) => {
+  return EMOJI_MAP[type || 'UNKNOWN'] || '📍'
+}
+
+const openEditModal = (seg: any) => {
+  timelineStore.openSegmentEditor(seg)
 }
 </script>
 
@@ -143,7 +153,7 @@ const getModeIcon = (mode?: string) => {
             :class="seg.type"
           >
             <div class="feed-icon-box">
-              <component :is="getModeIcon(seg.activityType)" :size="14" />
+              <span class="feed-emoji">{{ getEmoji(seg.activityType) }}</span>
             </div>
 
             <div class="feed-content">
@@ -151,7 +161,12 @@ const getModeIcon = (mode?: string) => {
                 <span class="feed-title">
                   {{ seg.type === 'visit' ? (seg.placeName || 'Stay') : (seg.activityType || 'Activity') }}
                 </span>
-                <span class="feed-duration">{{ formatDuration(seg.durationMinutes) }}</span>
+                <div class="feed-right-actions">
+                  <span class="feed-duration">{{ formatDuration(seg.durationMinutes) }}</span>
+                  <button class="feed-edit-btn" @click="openEditModal(seg)" title="Correct Travel Method">
+                    ✏️
+                  </button>
+                </div>
               </div>
 
               <div class="feed-meta">
@@ -434,6 +449,31 @@ const getModeIcon = (mode?: string) => {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 200px;
+}
+
+.feed-right-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.feed-edit-btn {
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  padding: 2px;
+}
+
+.feed-edit-btn:hover {
+  opacity: 1;
+  transform: scale(1.2);
+}
+
+.feed-emoji {
+  font-size: 15px;
 }
 
 .feed-duration {

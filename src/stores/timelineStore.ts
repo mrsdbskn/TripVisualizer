@@ -56,6 +56,10 @@ export const useTimelineStore = defineStore('timeline', {
     selectedCity: null as string | null,
     isCityDrawerOpen: false,
 
+    // Segment Activity Correction
+    editingSegment: null as TimelineSegment | null,
+    isSegmentEditOpen: false,
+
     // Playback Engine
     isPlaying: false,
     playbackSpeed: 10,
@@ -388,6 +392,27 @@ export const useTimelineStore = defineStore('timeline', {
       this.endDate = null
       this.playbackIndex = 0
       this.playbackSegmentProgress = 0
+      this.updateActiveJourneyState()
+    },
+
+    openSegmentEditor(segment: TimelineSegment) {
+      this.editingSegment = segment
+      this.isSegmentEditOpen = true
+    },
+
+    overrideSegmentActivity(segmentId: string, newType: ActivityType) {
+      const seg = this.segments.find(s => s.id === segmentId)
+      if (seg) {
+        seg.activityType = newType
+        if (newType === 'FLYING') {
+          seg.type = 'activity'
+          if (!seg.distanceMeters || seg.distanceMeters < 50000) {
+            seg.distanceMeters = 500000 // default flight estimate
+          }
+        }
+      }
+      this.isSegmentEditOpen = false
+      this.editingSegment = null
       this.updateActiveJourneyState()
     },
 

@@ -10,6 +10,7 @@ import CityDetailDrawer from './components/UI/CityDetailDrawer.vue'
 import StatsDrawer from './components/UI/StatsDrawer.vue'
 import FileUploadModal from './components/UI/FileUploadModal.vue'
 import StoryExportModal from './components/UI/StoryExportModal.vue'
+import SegmentEditModal from './components/UI/SegmentEditModal.vue'
 
 const timelineStore = useTimelineStore()
 const globeCanvasRef = ref<InstanceType<typeof GlobeCanvas> | null>(null)
@@ -80,6 +81,9 @@ const handleKeydown = (e: KeyboardEvent) => {
       :capture-snapshot="() => globeCanvasRef?.captureSnapshot() || ''"
       :get-canvas="() => globeCanvasRef?.getCanvas() || null"
     />
+
+    <!-- Segment Activity / Transport Method Correction Modal -->
+    <SegmentEditModal />
   </div>
 </template>
 
