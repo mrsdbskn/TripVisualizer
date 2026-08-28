@@ -12,6 +12,11 @@ import {
 } from '../../types/timeline';
 import { getActivityColor } from '../../services/geoUtils';
 
+// Ensure global THREE exists for globe.gl submodules
+if (typeof window !== 'undefined') {
+  (window as any).THREE = THREE;
+}
+
 interface GlobeVisualizerProps {
   data: TimelineDataset;
   theme: GlobeTheme;
@@ -93,7 +98,6 @@ export const GlobeVisualizer: React.FC<GlobeVisualizerProps> = ({
 
     return data.arcs.filter((arc) => {
       if (isPlaying) {
-        // Show arcs up to current playback time (or active around currentTime)
         return arc.startTime <= currentTime && arc.endTime >= rangeStart;
       }
       return arc.startTime <= rangeEnd && arc.endTime >= rangeStart;
@@ -130,8 +134,16 @@ export const GlobeVisualizer: React.FC<GlobeVisualizerProps> = ({
   useEffect(() => {
     if (!containerRef.current) return;
 
+    // Get Globe constructor safely across bundlers
+    const GlobeConstructor: any = typeof Globe === 'function' ? Globe : (Globe as any).default || Globe;
+
+    const width = containerRef.current.clientWidth || window.innerWidth;
+    const height = containerRef.current.clientHeight || window.innerHeight;
+
     // Create Globe instance
-    const globe = (Globe as any)()(containerRef.current)
+    const globe = GlobeConstructor()(containerRef.current)
+      .width(width)
+      .height(height)
       .globeImageUrl(globeTextures.globe)
       .bumpImageUrl(globeTextures.bump)
       .backgroundColor(globeTextures.bg)
@@ -159,16 +171,16 @@ export const GlobeVisualizer: React.FC<GlobeVisualizerProps> = ({
       canvasRefCallback(canvas);
     }
 
-    // Set initial position (e.g., Zurich / Europe default altitude)
+    // Set initial position (Zurich, Switzerland default altitude)
     globe.pointOfView({ lat: 47.3769, lng: 8.5417, altitude: 2.2 }, 1200);
 
     // Add Starfield & Ambient Lighting to Three.js Scene
     const scene = globe.scene();
     if (scene) {
-      const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+      const ambientLight = new THREE.AmbientLight(0xffffff, 1.4);
       scene.add(ambientLight);
 
-      const dirLight = new THREE.DirectionalLight(0xffffff, 1.8);
+      const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
       dirLight.position.set(100, 100, 100);
       scene.add(dirLight);
 
@@ -195,18 +207,22 @@ export const GlobeVisualizer: React.FC<GlobeVisualizerProps> = ({
     // Resize Observer
     const handleResize = () => {
       if (containerRef.current && globeInstanceRef.current) {
-        const width = containerRef.current.clientWidth;
-        const height = containerRef.current.clientHeight;
-        globeInstanceRef.current.width(width).height(height);
+        const w = containerRef.current.clientWidth || window.innerWidth;
+        const h = containerRef.current.clientHeight || window.innerHeight;
+        if (w > 0 && h > 0) {
+          globeInstanceRef.current.width(w).height(h);
+        }
       }
     };
 
     const resizeObserver = new ResizeObserver(handleResize);
     resizeObserver.observe(containerRef.current);
+    window.addEventListener('resize', handleResize);
     handleResize();
 
     return () => {
       resizeObserver.disconnect();
+      window.removeEventListener('resize', handleResize);
       if (globeInstanceRef.current) {
         globeInstanceRef.current._destructor?.();
       }
@@ -239,7 +255,7 @@ export const GlobeVisualizer: React.FC<GlobeVisualizerProps> = ({
       .arcEndLng((d: TripArc) => d.endLng)
       .arcColor((d: TripArc) => [d.color || '#38bdf8', '#ff007f'])
       .arcAltitude((d: TripArc) => d.altitude || 0.25)
-      .arcStroke(1.4)
+      .arcStroke(1.5)
       .arcDashLength(0.4)
       .arcDashGap(0.2)
       .arcDashInitialGap(() => Math.random())
@@ -251,7 +267,7 @@ export const GlobeVisualizer: React.FC<GlobeVisualizerProps> = ({
           <div style="color: #94a3b8; font-size: 11px;">${new Date(d.startTime).toLocaleDateString()}</div>
         </div>
       `)
-      .onArcHover((arc: any, prevArc: any) => {
+      .onArcHover((arc: any) => {
         if (onHoverItem) onHoverItem(arc);
       });
   }, [visibleArcs]);
@@ -261,7 +277,6 @@ export const GlobeVisualizer: React.FC<GlobeVisualizerProps> = ({
     const globe = globeInstanceRef.current;
     if (!globe) return;
 
-    // Rings data
     const ringsData = visibleVisits.slice(-30).map((v) => ({
       lat: v.lat,
       lng: v.lng,
@@ -341,7 +356,6 @@ export const GlobeVisualizer: React.FC<GlobeVisualizerProps> = ({
       return;
     }
 
-    // In 'follow-trip' or 'cinematic' mode: find active activity/point at currentTime
     if (playback.isPlaying || cameraMode === 'cinematic') {
       const activeArc = visibleArcs[visibleArcs.length - 1];
       const activeVisit = visibleVisits[visibleVisits.length - 1];
@@ -357,7 +371,6 @@ export const GlobeVisualizer: React.FC<GlobeVisualizerProps> = ({
         targetLng = activeVisit.lng;
       }
 
-      // Check if coordinate changed noticeably
       const last = lastTargetCoordsRef.current;
       if (!last || Math.abs(last.lat - targetLat) > 0.5 || Math.abs(last.lng - targetLng) > 0.5) {
         lastTargetCoordsRef.current = { lat: targetLat, lng: targetLng };
@@ -375,8 +388,13 @@ export const GlobeVisualizer: React.FC<GlobeVisualizerProps> = ({
           ? 'aspect-square max-h-[85vh] rounded-3xl border border-white/20 shadow-2xl'
           : ''
       }`}
+      style={{ minWidth: '100%', minHeight: '100%' }}
     >
-      <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+      <div
+        ref={containerRef}
+        className="w-full h-full cursor-grab active:cursor-grabbing"
+        style={{ width: '100%', height: '100%', minHeight: '100%' }}
+      />
     </div>
   );
 };
