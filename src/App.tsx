@@ -10,6 +10,7 @@ import { StatsDrawer } from './components/UI/StatsDrawer';
 import { StoryExportModal } from './components/StoryExport/StoryExportModal';
 import { StoryOverlay } from './components/StoryExport/StoryOverlay';
 import { getSampleTimelineData } from './data/sampleData';
+import { parseTimelineData } from './services/parser';
 import {
   TimelineDataset,
   GlobeTheme,
@@ -19,6 +20,7 @@ import {
   StoryExportConfig,
   TripCluster,
 } from './types/timeline';
+import { Sparkles, Check, Info } from 'lucide-react';
 
 export function App() {
   const initialData = getSampleTimelineData();
@@ -38,7 +40,7 @@ export function App() {
 
   // Playback state
   const [playback, setPlayback] = useState<PlaybackState>({
-    isPlaying: false,
+    isPlaying: true, // Start playing automatically so the globe is instantly dynamic!
     currentTime: initialData.summary.minTime,
     speedMultiplier: 10,
     loop: true,
@@ -56,6 +58,16 @@ export function App() {
   const [isDateFrameOpen, setIsDateFrameOpen] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
+
+  // Toast notifications
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((curr) => (curr === msg ? null : curr));
+    }, 4000);
+  };
 
   // Canvas ref for video recording
   const [canvasElement, setCanvasElement] = useState<HTMLCanvasElement | null>(null);
@@ -81,7 +93,11 @@ export function App() {
 
   // Handle layer toggles
   const handleToggleLayer = (layer: keyof LayerVisibility) => {
-    setLayers((prev) => ({ ...prev, [layer]: !prev[layer] }));
+    setLayers((prev) => {
+      const next = { ...prev, [layer]: !prev[layer] };
+      showToast(`Layer ${layer.toUpperCase()} turned ${next[layer] ? 'ON' : 'OFF'}`);
+      return next;
+    });
   };
 
   // Handle trip selection
@@ -97,13 +113,14 @@ export function App() {
       currentTime: trip.startDate,
       isPlaying: true,
     }));
+    showToast(`Focused on: ${trip.title}`);
   };
 
   // Handle new dataset loaded from file upload
-  const handleDatasetLoaded = (newDataset: TimelineDataset) => {
+  const handleDatasetLoaded = (newDataset: TimelineDataset, sourceLabel = 'Dataset') => {
     setData(newDataset);
     setPlayback({
-      isPlaying: false,
+      isPlaying: true,
       currentTime: newDataset.summary.minTime,
       speedMultiplier: 10,
       loop: true,
@@ -118,6 +135,21 @@ export function App() {
         newDataset.summary.totalDistanceKm
       ).toLocaleString()} km`,
     }));
+    showToast(`✨ ${sourceLabel} Loaded (${newDataset.summary.totalPoints.toLocaleString()} points, ${newDataset.summary.flightCount} flights)`);
+  };
+
+  // 1-Click Load Timeline.json directly
+  const handleDirectLoadTimelineJson = async () => {
+    showToast('⏳ Loading Timeline.json (99.9 MB)...');
+    try {
+      const resp = await fetch('./Timeline.json');
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+      const parsed = parseTimelineData(json);
+      handleDatasetLoaded(parsed, 'Timeline.json');
+    } catch (e: any) {
+      showToast('❌ Failed to load Timeline.json: ' + e.message);
+    }
   };
 
   // Playback animation tick loop
@@ -135,7 +167,6 @@ export function App() {
         if (!prev.isPlaying) return prev;
 
         const rangeSpan = prev.rangeEnd - prev.rangeStart;
-        // Total playback duration of the current range in seconds (scaled by speed multiplier)
         const baseSeconds = 45 / prev.speedMultiplier;
         const advanceMs = (deltaSec / Math.max(1, baseSeconds)) * rangeSpan;
 
@@ -161,18 +192,30 @@ export function App() {
 
   return (
     <div className="relative w-screen h-screen bg-[#08090d] overflow-hidden select-none">
-      {/* Top Navigation Header */}
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[120] glass-panel px-5 py-2.5 border border-cyan-400/50 bg-slate-950/90 text-cyan-300 text-xs font-mono font-bold shadow-2xl flex items-center gap-2.5 animate-in fade-in slide-in-from-top-2 duration-200">
+          <Sparkles className="w-4 h-4 text-cyan-400 animate-pulse" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Top Navigation Header (Always accessible at z-[60]) */}
       <Header
         data={data}
         isStoryMode={isStoryMode}
-        onToggleStoryMode={() => setIsStoryMode(!isStoryMode)}
+        onToggleStoryMode={() => {
+          setIsStoryMode(!isStoryMode);
+          showToast(!isStoryMode ? '📱 Instagram 9:16 Story Frame Enabled' : '🌍 Fullscreen 3D Globe Enabled');
+        }}
         onOpenUpload={() => setIsUploadOpen(true)}
         onOpenStats={() => setIsStatsOpen(true)}
         onOpenExportModal={() => setIsExportOpen(true)}
-        onLoadDemo={() => handleDatasetLoaded(getSampleTimelineData())}
+        onLoadDemo={() => handleDatasetLoaded(getSampleTimelineData(), 'Demo Journey')}
+        onLoadTimelineJsonDirect={handleDirectLoadTimelineJson}
       />
 
-      {/* 3D Globe Visualizer */}
+      {/* 3D Globe Visualizer Main Canvas */}
       <main className="w-full h-full flex items-center justify-center">
         {isStoryMode ? (
           <div className="story-viewport-wrapper">
@@ -186,7 +229,15 @@ export function App() {
                 aspectRatioMode="9:16"
                 canvasRefCallback={setCanvasElement}
               />
-              <StoryOverlay data={data} playback={playback} config={storyConfig} />
+              <StoryOverlay
+                data={data}
+                playback={playback}
+                config={storyConfig}
+                onExitStoryMode={() => {
+                  setIsStoryMode(false);
+                  showToast('🌍 Fullscreen 3D Globe Enabled');
+                }}
+              />
             </div>
           </div>
         ) : (
@@ -211,9 +262,15 @@ export function App() {
         theme={theme}
         layers={layers}
         cameraMode={cameraMode}
-        onThemeChange={setTheme}
+        onThemeChange={(t) => {
+          setTheme(t);
+          showToast(`Theme switched to ${t.replace('-', ' ').toUpperCase()}`);
+        }}
         onLayerToggle={handleToggleLayer}
-        onCameraModeChange={setCameraMode}
+        onCameraModeChange={(m) => {
+          setCameraMode(m);
+          showToast(`Camera mode: ${m.toUpperCase()}`);
+        }}
       />
 
       {/* Bottom Timeline Scrubber & Player */}
@@ -229,7 +286,7 @@ export function App() {
       <FileUploadModal
         isOpen={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
-        onDatasetLoaded={handleDatasetLoaded}
+        onDatasetLoaded={(ds) => handleDatasetLoaded(ds, 'Custom Timeline')}
       />
 
       <DateFramePicker
@@ -237,9 +294,10 @@ export function App() {
         onClose={() => setIsDateFrameOpen(false)}
         data={data}
         playback={playback}
-        onSelectRange={(start, end) =>
-          handleUpdatePlayback({ rangeStart: start, rangeEnd: end, currentTime: start })
-        }
+        onSelectRange={(start, end) => {
+          handleUpdatePlayback({ rangeStart: start, rangeEnd: end, currentTime: start });
+          showToast(`Date frame set: ${new Date(start).toLocaleDateString()} ➔ ${new Date(end).toLocaleDateString()}`);
+        }}
       />
 
       <StatsDrawer
