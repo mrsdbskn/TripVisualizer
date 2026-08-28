@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   X,
   Plane,
@@ -20,6 +20,17 @@ interface StatsDrawerProps {
 }
 
 export const StatsDrawer: React.FC<StatsDrawerProps> = ({ isOpen, onClose, data }) => {
+  // Listen for Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const { summary, trips, activities, visits } = data;
@@ -35,12 +46,17 @@ export const StatsDrawer: React.FC<StatsDrawerProps> = ({ isOpen, onClose, data 
   const sortedTransport = Object.entries(transportStats).sort((a, b) => b[1] - a[1]);
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="glass-panel w-full max-w-md h-full rounded-none border-l border-white/15 bg-slate-950/90 p-6 flex flex-col gap-5 overflow-y-auto animate-in slide-in-from-right duration-300">
-        {/* Header */}
+    <div
+      className="fixed inset-0 z-[100] flex justify-end bg-black/75 backdrop-blur-md animate-in fade-in duration-200"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="glass-panel w-full max-w-md h-full rounded-none border-l border-white/20 bg-slate-950 p-6 flex flex-col gap-5 overflow-y-auto animate-in slide-in-from-right duration-300 shadow-2xl">
+        {/* Header with Prominent Close Button */}
         <div className="flex items-center justify-between pb-4 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
+            <div className="p-2.5 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30">
               <Award className="w-5 h-5" />
             </div>
             <div>
@@ -48,11 +64,15 @@ export const StatsDrawer: React.FC<StatsDrawerProps> = ({ isOpen, onClose, data 
               <p className="text-xs text-slate-400 font-mono">Lifetime Location Telemetry</p>
             </div>
           </div>
+
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10"
+            title="Close Travel Stats"
+            className="glass-button text-xs px-3 py-1.5 rounded-xl border border-white/20 text-slate-200 hover:text-white hover:bg-white/15 cursor-pointer flex items-center gap-1.5"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 text-pink-400" />
+            <span className="font-mono font-bold">Close</span>
           </button>
         </div>
 
@@ -163,6 +183,15 @@ export const StatsDrawer: React.FC<StatsDrawerProps> = ({ isOpen, onClose, data 
             </div>
           </div>
         )}
+
+        {/* Bottom Close Button */}
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-full glass-button justify-center py-2.5 text-xs font-mono uppercase tracking-wider text-slate-300 hover:text-white border-white/15 hover:border-white/30 cursor-pointer mt-auto"
+        >
+          Close Drawer
+        </button>
       </div>
     </div>
   );

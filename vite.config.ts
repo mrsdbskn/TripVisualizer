@@ -13,7 +13,6 @@ export default defineConfig({
         manualChunks: {
           vendor: ['react', 'react-dom'],
           three: ['three'],
-          globe: ['globe.gl'],
         },
       },
     },
